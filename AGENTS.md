@@ -89,6 +89,23 @@ pkill -f "vite"
 - **Frontend**: Vite HMR auto-reloads in the browser on save.
 - **Hard restart**: run Stop, then Start.
 
+## Auth
+
+Single-token Bearer auth gated by the `WHEREISIT_TOKEN` env var (implemented in [backend/app/auth.py](backend/app/auth.py)).
+
+- **Unset / empty** → dev mode, every endpoint is open.
+- **Set** → every endpoint except `/health` requires `Authorization: Bearer <token>`; mismatched or missing header returns `401` with a `WWW-Authenticate: Bearer` header.
+
+```bash
+# Strict mode
+export WHEREISIT_TOKEN=$(openssl rand -hex 32)
+curl -H "Authorization: Bearer $WHEREISIT_TOKEN" http://localhost:8000/items/
+
+# Swagger UI works too — click "Authorize" and paste `Bearer <token>`.
+```
+
+The check lives in a single middleware function so swapping for JWT/OAuth later is a one-file change.
+
 ## Tests
 
 Backend tests live in [tests/](tests/) and run against the docker-compose MySQL in a dedicated `whereisit_test` database (created/dropped per session by the fixture in [tests/conftest.py](tests/conftest.py)).
