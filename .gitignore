@@ -1,0 +1,25 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+
+# Docker / data
+db_data/
+
+# Local databases
+*.db
+
+# Runtime artefacts
+*.log
+*.pid
+
+# Secrets / local config
+.env
+.env.*

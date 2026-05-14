@@ -1,0 +1,111 @@
+
+:root{
+	--bg: #ffffff;
+	--panel: #ffffff;
+	--muted: #6b7280;
+	--text: #0f172a;
+	--border: #e5e7eb;
+	--accent: #2563eb;
+}
+
+.dark{
+	--bg: #0b1220;
+	--panel: #091226;
+	--muted: #94a3b8;
+	--text: #e6eef8;
+	--border: #1f2a44;
+	--accent: #3b82f6;
+}
+
+html, body { height: 100%; }
+body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin: 0; padding: 0; background: var(--bg); color: var(--text); }
+.app { padding: 20px; max-width: 1200px; margin: 0 auto }
+header { margin-bottom: 16px; display:flex; align-items:center; justify-content:space-between }
+main { display: flex; gap: 20px }
+.col { flex: 1 }
+.card { background: var(--panel); border: 1px solid var(--border); padding: 14px; margin-bottom: 12px; border-radius: 10px; box-shadow: 0 1px 2px rgba(2,6,23,0.05) }
+.card h3 { margin: 0 0 8px 0 }
+form input, form textarea, form select { width: 100%; padding: 8px; margin-bottom: 8px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text) }
+button { padding: 8px 12px; border-radius: 6px; background: var(--accent); color: white; border: none; cursor: pointer }
+button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border) }
+.list { max-height: 300px; overflow: auto }
+.list-item { padding: 8px; border-bottom: 1px solid var(--border); color: var(--text) }
+
+.theme-toggle { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 8px; cursor: pointer }
+.small { font-size: 0.9rem; color: var(--muted) }
+
+.overview-map { display:block }
+.overview-map .slot { padding:8px; border:1px dashed var(--border); margin-bottom:6px; border-radius:6px }
+
+/* Overview tables: three equal-width columns with scrollable tbody showing ~10 rows */
+.overview-tables { display:flex; gap:12px }
+.overview-tables.stacked { display:block }
+.overview-table { flex: 1; min-width:0 }
+.overview-table + .overview-table { margin-top: 16px }
+.overview-table h3 { margin-top:0 }
+.overview-table table { width:100%; border-collapse: collapse; table-layout: fixed; border: 1px solid var(--border); background: var(--panel) }
+.overview-table thead th { background: rgba(15, 29, 158, 0.527); padding: 8px; text-align: left; border-bottom: 1px solid var(--border) }
+.overview-table td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left }
+.overview-table .small { color: var(--muted) }
+.overview-table .table-body { display:block; max-height: calc(10 * 40px); overflow: auto; scrollbar-gutter: stable }
+.overview-table thead { display: table; width: 100%; table-layout: fixed }
+.overview-table thead, .overview-table tbody tr { display: table; width: 100%; table-layout: fixed }
+.overview-table tbody { display: block }
+
+/* ensure consistent box model for cells */
+.overview-table th, .overview-table td { box-sizing: border-box }
+
+/* Ensure Name column is left-justified */
+.overview-table thead th:nth-child(2),
+.overview-table td:nth-child(2) { text-align: left }
+
+/* Make ID column narrow (fits ~3 digits) so Name column aligns with title */
+.overview-table thead th:nth-child(1),
+.overview-table td:nth-child(1) {
+	width: 4ch;
+	max-width: 4ch;
+	white-space: nowrap;
+	padding-right: 8px;
+}
+
+/* Row hover & clickable */
+.overview-table tbody tr { cursor: pointer }
+.overview-table tbody tr:hover { background: rgba(59,130,246,0.06) }
+
+/* Modal */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; z-index:1000 }
+.modal { background: var(--panel); border: 1px solid var(--border); padding: 16px; border-radius: 8px; width: 720px; max-width: 95%; max-height: 80vh; overflow:auto }
+.modal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px }
+.modal-body { padding-top:4px }
+.detail-table { width:100%; border-collapse: collapse }
+.detail-table th { text-align:left; padding:6px; width:30%; color:var(--muted) }
+.detail-table td { padding:6px }
+
+/* Form table for edit panes */
+.form-table { width: 100%; border-collapse: collapse; margin-top: 8px }
+.form-table th { text-align: right; padding: 8px 12px 8px 0; vertical-align: middle; color: var(--muted); width: 120px }
+.form-table td { padding: 6px 0 }
+.form-table input { width: 100%; }
+
+/* Small widget select style fallback */
+.list-select { width:100%; }
+
+/* Layout: sidebar + content + side */
+.layout { display: flex; gap: 20px }
+.sidebar { width: 220px; background: var(--panel); border: 1px solid var(--border); padding: 14px; border-radius: 10px }
+.sidebar .brand { font-size: 1.1rem; margin-bottom: 12px }
+.sidebar nav { display:flex; flex-direction:column; gap:6px }
+.sidebar-item { padding: 10px; border-radius: 8px; cursor: pointer; color: var(--text) }
+.sidebar-item.active { background: rgba(59,130,246,0.12); color: var(--accent); font-weight:600 }
+.sidebar-footer { margin-top: 20px; color: var(--muted) }
+
+.content { flex: 1; display:flex }
+.content-main { flex: 2; }
+.content-side { width: 320px }
+
+@media(max-width:900px){
+	.layout{flex-direction:column}
+	.sidebar{width:auto}
+	.content-side{width:auto}
+}
+
