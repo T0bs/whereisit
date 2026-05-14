@@ -91,12 +91,17 @@ pkill -f "vite"
 
 ## Tests
 
-No tests are configured yet. When adding them:
+Backend tests live in [tests/](tests/) and run against the docker-compose MySQL in a dedicated `whereisit_test` database (created/dropped per session by the fixture in [tests/conftest.py](tests/conftest.py)).
 
 ```bash
 . .venv/bin/activate
-pytest                       # backend (once tests exist under backend/)
+docker compose up -d db      # tests need the MySQL container
+pytest                       # all backend tests
+pytest tests/test_health.py  # single file
+pytest -k health             # by keyword
 ```
+
+The fixture connects as MySQL `root` (password `rootpw`, matches [docker-compose.yml](docker-compose.yml)) to `CREATE DATABASE` and grant the `whereisit` user access. Override defaults with env vars when needed: `WHEREISIT_TEST_DATABASE_URL`, `WHEREISIT_TEST_DB_HOST`, `WHEREISIT_TEST_DB_PORT`, `WHEREISIT_TEST_DB_ROOT_USER`, `WHEREISIT_TEST_DB_ROOT_PASSWORD`, `WHEREISIT_TEST_DB_NAME`, `WHEREISIT_TEST_DB_APP_USER`.
 
 The frontend has no test runner configured.
 
