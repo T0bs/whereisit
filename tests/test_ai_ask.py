@@ -315,6 +315,176 @@ def test_system_prompt_passed_to_llm(client, monkeypatch):
     assert "inventory" in local.last_system.lower()
 
 
+# ---------------------------------------------------------------------------
+# write-tool name resolution — LLMs often pass names where the schema wants ints
+# ---------------------------------------------------------------------------
+
+
+def test_add_node_resolves_parent_name_to_id(client, monkeypatch):
+    garage = _make_node(client, "Garage", "room", can_contain=True)
+
+    local = ScriptedToolLoopProvider(
+        "local",
+        calls=[
+            (
+                "add_node",
+                {"name": "Hammer", "kind": "tool", "parent_id": "Garage"},
+            )
+        ],
+        final_text="added the hammer to the garage",
+    )
+    _patch_providers(monkeypatch, local=local)
+
+    response = client.post(
+        "/ai/ask", json={"question": "add a hammer to nonexistentplace called the garage"}
+    )
+    assert response.status_code == 200, response.text
+    trace = response.json()["tool_calls"][0]
+    assert trace["is_error"] is False, trace["output"]
+
+    children = client.get(f"/nodes/{garage['id']}/children").json()
+    names = [n["name"] for n in children]
+    assert "Hammer" in names
+
+
+def test_add_node_resolves_parent_name_case_insensitive(client, monkeypatch):
+    garage = _make_node(client, "Garage", "room", can_contain=True)
+
+    local = ScriptedToolLoopProvider(
+        "local",
+        calls=[
+            (
+                "add_node",
+                {"name": "Drill", "kind": "tool", "parent_id": "garage"},
+            )
+        ],
+        final_text="ok",
+    )
+    _patch_providers(monkeypatch, local=local)
+
+    response = client.post("/ai/ask", json={"question": "any nonexistentwidget"})
+    trace = response.json()["tool_calls"][0]
+    assert trace["is_error"] is False, trace["output"]
+    children = client.get(f"/nodes/{garage['id']}/children").json()
+    assert any(n["name"] == "Drill" for n in children)
+
+
+def test_add_node_unknown_parent_name_404(client, monkeypatch):
+    local = ScriptedToolLoopProvider(
+        "local",
+        calls=[
+            (
+                "add_node",
+                {"name": "Hammer", "kind": "tool", "parent_id": "atlantis"},
+            )
+        ],
+        final_text="i tried",
+    )
+    _patch_providers(monkeypatch, local=local)
+
+    response = client.post("/ai/ask", json={"question": "any nonexistentwidget"})
+    trace = response.json()["tool_calls"][0]
+    assert trace["is_error"] is True
+    assert "no node named" in trace["output"].lower()
+
+
+def test_add_node_ambiguous_parent_name_400(client, monkeypatch):
+    _make_node(client, "Drawer", "drawer", can_contain=True)
+    _make_node(client, "Drawer", "drawer", can_contain=True)
+
+    local = ScriptedToolLoopProvider(
+        "local",
+        calls=[
+            (
+                "add_node",
+                {"name": "Hammer", "kind": "tool", "parent_id": "drawer"},
+            )
+        ],
+        final_text="ambiguous",
+    )
+    _patch_providers(monkeypatch, local=local)
+
+    response = client.post("/ai/ask", json={"question": "any nonexistentwidget"})
+    trace = response.json()["tool_calls"][0]
+    assert trace["is_error"] is True
+    assert "ambiguous" in trace["output"].lower()
+
+
+def test_add_node_int_parent_id_passthrough(client, monkeypatch):
+    """Existing int-id callers (cloud LLM, MCP) keep working unchanged."""
+    garage = _make_node(client, "Garage", "room", can_contain=True)
+
+    local = ScriptedToolLoopProvider(
+        "local",
+        calls=[
+            (
+                "add_node",
+                {"name": "Hammer", "kind": "tool", "parent_id": garage["id"]},
+            )
+        ],
+        final_text="ok",
+    )
+    _patch_providers(monkeypatch, local=local)
+
+    response = client.post("/ai/ask", json={"question": "any nonexistentwidget"})
+    trace = response.json()["tool_calls"][0]
+    assert trace["is_error"] is False
+
+
+def test_add_node_parent_root_string(client, monkeypatch):
+    """'root' / 'null' as parent_id maps to no parent (top-level)."""
+    local = ScriptedToolLoopProvider(
+        "local",
+        calls=[
+            ("add_node", {"name": "Garage", "kind": "room", "parent_id": "root", "can_contain": True}),
+        ],
+        final_text="ok",
+    )
+    _patch_providers(monkeypatch, local=local)
+
+    response = client.post("/ai/ask", json={"question": "any nonexistentwidget"})
+    trace = response.json()["tool_calls"][0]
+    assert trace["is_error"] is False
+    roots = client.get("/nodes", params={"parent": "root"}).json()
+    assert any(r["name"] == "Garage" for r in roots)
+
+
+def test_move_node_resolves_both_names(client, monkeypatch):
+    garage = _make_node(client, "Garage", "room", can_contain=True)
+    basement = _make_node(client, "Basement", "room", can_contain=True)
+    hammer = _make_node(client, "Hammer", "tool", parent_id=garage["id"])
+
+    local = ScriptedToolLoopProvider(
+        "local",
+        calls=[("move_node", {"node_id": "Hammer", "parent_id": "Basement"})],
+        final_text="moved",
+    )
+    _patch_providers(monkeypatch, local=local)
+
+    response = client.post("/ai/ask", json={"question": "any nonexistentwidget"})
+    trace = response.json()["tool_calls"][0]
+    assert trace["is_error"] is False, trace["output"]
+    detail = client.get(f"/nodes/{hammer['id']}").json()
+    assert detail["parent_id"] == basement["id"]
+
+
+def test_add_tag_resolves_node_name(client, monkeypatch):
+    hammer = _make_node(client, "Hammer", "tool")
+
+    local = ScriptedToolLoopProvider(
+        "local",
+        calls=[("add_tag", {"node_id": "Hammer", "name": "metal"})],
+        final_text="tagged",
+    )
+    _patch_providers(monkeypatch, local=local)
+
+    response = client.post("/ai/ask", json={"question": "any nonexistentwidget"})
+    trace = response.json()["tool_calls"][0]
+    assert trace["is_error"] is False, trace["output"]
+    detail = client.get(f"/nodes/{hammer['id']}").json()
+    assert any(t["name"] == "metal" for t in detail["tags"])
+
+
 def test_all_inventory_tools_exposed_to_llm(client, monkeypatch):
     """The LLM should see the full 14-tool surface (read + write)."""
     local = ScriptedToolLoopProvider("local", final_text="ok")

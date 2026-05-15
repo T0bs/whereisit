@@ -12,10 +12,10 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from fastapi import HTTPException, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import Tag
+from ..models import Node, Tag
 from ..routers import kinds as kinds_router
 from ..routers import nodes as nodes_router
 from ..routers import search as search_router
@@ -256,6 +256,55 @@ def _serialize(value: Any) -> str:
     return json.dumps(value, default=str)
 
 
+def _resolve_node_ref(db: Session, value: Any, *, allow_none: bool = False) -> Any:
+    """Accept an int id OR a string name and return the int id.
+
+    Local LLMs sometimes pass a node's name where the schema expects its id.
+    This resolver makes the dispatch forgiving: ints pass through; numeric
+    strings parse as ints; other strings are looked up case-insensitively by
+    name (with ambiguity returning a helpful error). When ``allow_none`` is
+    set (parent_id semantics), ``None`` and the literal ``"root"``/``"null"``
+    map to ``None``.
+    """
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        if allow_none:
+            return None
+        raise HTTPException(status_code=400, detail="node id is required")
+    if isinstance(value, bool):  # bools subclass int; reject early
+        raise HTTPException(status_code=400, detail=f"invalid node id: {value!r}")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        s = value.strip()
+        if allow_none and s.lower() in ("root", "null", "none"):
+            return None
+        try:
+            return int(s)
+        except ValueError:
+            pass
+        matches = (
+            db.execute(select(Node).where(func.lower(Node.name) == s.lower()))
+            .scalars()
+            .all()
+        )
+        if len(matches) == 1:
+            return matches[0].id
+        if not matches:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no node named {s!r}; call search() to find the right id",
+            )
+        listed = ", ".join(f"#{m.id} ({m.name})" for m in matches[:5])
+        raise HTTPException(
+            status_code=400,
+            detail=f"ambiguous node name {s!r}; matches: {listed}",
+        )
+    raise HTTPException(
+        status_code=400,
+        detail=f"node id must be int or string name, got {type(value).__name__}",
+    )
+
+
 def _do_search(db: Session, args: dict) -> Any:
     return search_router.search(
         q=args.get("q"),
@@ -270,12 +319,12 @@ def _do_search(db: Session, args: dict) -> Any:
 
 
 def _do_get_node(db: Session, args: dict) -> Any:
-    return nodes_router.get_node(node_id=int(args["node_id"]), db=db)
+    return nodes_router.get_node(node_id=_resolve_node_ref(db, args.get("node_id")), db=db)
 
 
 def _do_get_children(db: Session, args: dict) -> Any:
     return nodes_router.list_children(
-        node_id=int(args["node_id"]),
+        node_id=_resolve_node_ref(db, args.get("node_id")),
         limit=int(args.get("limit", 50)),
         offset=0,
         db=db,
@@ -283,7 +332,7 @@ def _do_get_children(db: Session, args: dict) -> Any:
 
 
 def _do_get_path(db: Session, args: dict) -> Any:
-    return nodes_router.get_path(node_id=int(args["node_id"]), db=db)
+    return nodes_router.get_path(node_id=_resolve_node_ref(db, args.get("node_id")), db=db)
 
 
 def _do_list_root_nodes(db: Session, args: dict) -> Any:
@@ -310,7 +359,7 @@ def _do_add_node(db: Session, args: dict) -> Any:
     body = NodeCreate(
         name=args["name"],
         kind=args["kind"],
-        parent_id=args.get("parent_id"),
+        parent_id=_resolve_node_ref(db, args.get("parent_id"), allow_none=True),
         can_contain=bool(args.get("can_contain", False)),
         description=args.get("description"),
         quantity=int(args.get("quantity", 1)),
@@ -319,48 +368,54 @@ def _do_add_node(db: Session, args: dict) -> Any:
 
 
 def _do_update_node(db: Session, args: dict) -> Any:
+    node_id = _resolve_node_ref(db, args.get("node_id"))
     payload = {k: v for k, v in args.items() if k != "node_id"}
+    if "parent_id" in payload:
+        payload["parent_id"] = _resolve_node_ref(db, payload["parent_id"], allow_none=True)
     body = NodeUpdate(**payload)
-    return nodes_router.update_node(node_id=int(args["node_id"]), body=body, db=db)
+    return nodes_router.update_node(node_id=node_id, body=body, db=db)
 
 
 def _do_move_node(db: Session, args: dict) -> Any:
-    body = NodeUpdate(parent_id=args.get("parent_id"))
-    return nodes_router.update_node(node_id=int(args["node_id"]), body=body, db=db)
+    body = NodeUpdate(
+        parent_id=_resolve_node_ref(db, args.get("parent_id"), allow_none=True)
+    )
+    return nodes_router.update_node(
+        node_id=_resolve_node_ref(db, args.get("node_id")), body=body, db=db
+    )
 
 
 def _do_delete_node(db: Session, args: dict) -> Any:
-    nodes_router.delete_node(
-        node_id=int(args["node_id"]),
-        cascade=bool(args.get("cascade", False)),
-        db=db,
-    )
-    return {"deleted": int(args["node_id"]), "cascade": bool(args.get("cascade", False))}
+    node_id = _resolve_node_ref(db, args.get("node_id"))
+    cascade = bool(args.get("cascade", False))
+    nodes_router.delete_node(node_id=node_id, cascade=cascade, db=db)
+    return {"deleted": node_id, "cascade": cascade}
 
 
 def _do_add_tag(db: Session, args: dict) -> Any:
+    node_id = _resolve_node_ref(db, args.get("node_id"))
     body = TagCreate(name=args["name"])
     response = Response()
     return nodes_router.add_tag_to_node(
-        node_id=int(args["node_id"]), body=body, response=response, db=db
+        node_id=node_id, body=body, response=response, db=db
     )
 
 
 def _do_remove_tag(db: Session, args: dict) -> Any:
+    node_id = _resolve_node_ref(db, args.get("node_id"))
     tag = db.execute(select(Tag).where(Tag.name == args["name"])).scalar_one_or_none()
     if tag is None:
         raise HTTPException(status_code=404, detail=f"tag {args['name']!r} does not exist")
-    nodes_router.remove_tag_from_node(
-        node_id=int(args["node_id"]), tag_id=tag.id, db=db
-    )
-    return {"removed": args["name"], "node_id": int(args["node_id"])}
+    nodes_router.remove_tag_from_node(node_id=node_id, tag_id=tag.id, db=db)
+    return {"removed": args["name"], "node_id": node_id}
 
 
 def _do_set_property(db: Session, args: dict) -> Any:
+    node_id = _resolve_node_ref(db, args.get("node_id"))
     body = PropertyValueSet(value=args["value"], value_type=args.get("value_type"))
     response = Response()
     return nodes_router.set_node_property(
-        node_id=int(args["node_id"]),
+        node_id=node_id,
         key=str(args["key"]),
         body=body,
         response=response,
