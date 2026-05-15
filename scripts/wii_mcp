@@ -356,6 +356,53 @@ def delete_property(node_id: int, key: str) -> str:
     return f"removed property {key!r} from node {node_id}"
 
 
+@mcp.tool()
+def suggest_placement(
+    description: str,
+    tags: Optional[list[str]] = None,
+    kind: Optional[str] = None,
+    confirm_remote: bool = False,
+    max_suggestions: int = 5,
+) -> dict:
+    """Ask the inventory where a new thing should live.
+
+    Runs a cascade: (1) DB heuristic over `can_contain=True` nodes scoring
+    tag overlap + kind-affinity; (2) if the best heuristic match is weak,
+    a local LLM (Ollama) reranks the top candidates and returns one-line
+    reasons; (3) if `confirm_remote=True` AND the server has
+    `WHEREISIT_CLOUD_ENABLED=true`, the same prompt routes to Anthropic
+    instead. Anything else returns the best heuristic picks as a fallback.
+
+    Args:
+        description: Free-text description of the thing. Required.
+            E.g. "claw hammer with rubber grip" or "spare AA batteries".
+        tags: Tags the new thing already has or *should* have. Used to
+            score containers by tag overlap. Examples: ["tool", "metal"].
+        kind: Slug for the kind of thing being placed (e.g. "tool",
+            "consumable", "item"). Used by the kind-affinity heuristic
+            (tools fit drawers/cupboards, consumables fit boxes/bags).
+        confirm_remote: Explicit opt-in for tier 3 (Anthropic cloud).
+            Default False. With the server-side kill switch off, setting
+            this True returns a 400 — flip both gates to use cloud.
+        max_suggestions: How many picks to return (1–20, default 5).
+
+    Returns: {suggestions: [{node_id, node_name, path, kind, reason,
+        score}, ...], tier_used, cloud_enabled, message?}. `tier_used` is
+        one of "heuristic", "local", "anthropic", "heuristic_fallback",
+        "empty_db".
+    """
+    body: dict = {
+        "description": description,
+        "confirm_remote": confirm_remote,
+        "max_suggestions": max_suggestions,
+    }
+    if tags:
+        body["tags"] = tags
+    if kind:
+        body["kind"] = kind
+    return _call("POST", "/ai/suggest-placement", body=body)
+
+
 def main() -> None:
     mcp.run()
 
