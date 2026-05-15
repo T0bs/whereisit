@@ -1,94 +1,87 @@
-import React, { useEffect, useState } from 'react'
-import Items from './components/Items'
-import Containers from './components/Containers'
-import Placements from './components/Placements'
-import Search from './components/Search'
-import Overview from './components/Overview'
-import OverviewPage from './pages/OverviewPage'
-import ContainerEdit from './components/ContainerEdit'
-import ItemEdit from './components/ItemEdit'
-import Sidebar from './components/Sidebar'
-import Tags from './components/Tags'
+import React, { useState } from "react";
+import TreeView from "./components/TreeView";
+import NodeDetail from "./components/NodeDetail";
+import SearchPanel from "./components/SearchPanel";
+import AskPanel from "./components/AskPanel";
+import QuickAddModal from "./components/QuickAddModal";
 
-function ConfigPage(){
-  return (
-    <div className="card">
-      <h3>Configuration</h3>
-      <div className="small">App-level settings go here.</div>
-    </div>
-  )
-}
-
-const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+const TABS = [
+  { id: "detail", label: "Detail" },
+  { id: "search", label: "Search" },
+  { id: "ask", label: "Ask" },
+];
 
 export default function App() {
-  const [items, setItems] = useState([])
-  const [containers, setContainers] = useState([])
-  const [theme, setTheme] = useState(() => localStorage.getItem('whereisit:theme') || 'dark')
+  const [selectedId, setSelectedId] = useState(null);
+  const [tab, setTab] = useState("detail");
+  const [addOpen, setAddOpen] = useState(false);
+  const [addParent, setAddParent] = useState(null);
 
-  const reload = async () => {
-    const [ri, rc] = await Promise.all([
-      fetch(`${API}/items/`).then(r => r.json()),
-      fetch(`${API}/containers/`).then(r => r.json()),
-    ])
-    setItems(ri)
-    setContainers(rc)
-  }
+  const openAdd = (parentId = null) => {
+    setAddParent(parentId);
+    setAddOpen(true);
+  };
+  const closeAdd = () => setAddOpen(false);
 
-  useEffect(() => { reload() }, [])
-
-  useEffect(() => {
-    const root = document.documentElement
-    if (theme === 'dark') root.classList.add('dark')
-    else root.classList.remove('dark')
-    localStorage.setItem('whereisit:theme', theme)
-  }, [theme])
-
-  const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark')
-
-  const [page, setPage] = useState('overview')
-  const [selectedContainerId, setSelectedContainerId] = useState(null)
-  const [selectedItemId, setSelectedItemId] = useState(null)
-
-  const renderPage = () => {
-    switch(page){
-      case 'overview': return <OverviewPage api={API} onEdit={(type,id)=>{ if(type==='containers') { setSelectedContainerId(id); setSelectedItemId(null) } if(type==='items'){ setSelectedItemId(id); setSelectedContainerId(null) } }} />
-      case 'search': return <Search api={API} onSelect={reload} />
-      case 'items': return <Items api={API} items={items} onChange={reload} />
-      case 'tags': return <Tags api={API} onChange={reload} />
-      case 'containers': return <Containers api={API} containers={containers} onChange={reload} />
-      case 'placements': return <Placements api={API} items={items} containers={containers} onChange={reload} />
-      case 'config': return <ConfigPage />
-      default: return <Search api={API} onSelect={reload} />
-    }
-  }
+  const handleSelect = (id) => {
+    setSelectedId(id);
+    setTab("detail");
+  };
 
   return (
-    <div className="app">
-      <header>
-        <h1>Whereisit</h1>
-        <div>
-          <button className="theme-toggle" onClick={toggleTheme}>{theme === 'dark' ? 'Light' : 'Dark'} mode</button>
-        </div>
+    <div className="h-full flex flex-col">
+      <header className="border-b border-slate-200 bg-white px-4 py-2 flex items-center justify-between">
+        <h1 className="text-lg font-semibold tracking-tight">whereisit</h1>
+        <button
+          onClick={() => openAdd(null)}
+          className="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white hover:bg-slate-700"
+        >
+          + Add root
+        </button>
       </header>
 
-      <div className="layout">
-        <Sidebar page={page} setPage={setPage} />
-        <section className="content">
-          <div className="content-main">
-            {renderPage()}
-          </div>
-        </section>
-        <aside className="content-side">
-          {selectedContainerId ? (
-            <ContainerEdit api={API} containerId={selectedContainerId} onSaved={()=>{ setSelectedContainerId(null); reload() }} onCancel={()=>setSelectedContainerId(null)} />
-          ) : selectedItemId ? (
-            <ItemEdit api={API} itemId={selectedItemId} onSaved={()=>{ setSelectedItemId(null); reload() }} onCancel={()=>setSelectedItemId(null)} />
-          ) : (
-            null
-          )}
+      <div className="flex-1 min-h-0 flex">
+        <aside className="w-80 border-r border-slate-200 bg-white overflow-auto scrollbar-thin">
+          <TreeView
+            selectedId={selectedId}
+            onSelect={handleSelect}
+            onAddChild={(id) => openAdd(id)}
+          />
         </aside>
+
+        <main className="flex-1 min-w-0 flex flex-col">
+          <nav className="border-b border-slate-200 bg-white px-4 flex gap-1">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={
+                  "px-3 py-2 text-sm border-b-2 -mb-px transition-colors " +
+                  (tab === t.id
+                    ? "border-slate-900 text-slate-900 font-medium"
+                    : "border-transparent text-slate-500 hover:text-slate-900")
+                }
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
+          <div className="flex-1 min-h-0 overflow-auto scrollbar-thin p-4">
+            {tab === "detail" && (
+              <NodeDetail
+                nodeId={selectedId}
+                onSelect={handleSelect}
+                onAddChild={(id) => openAdd(id)}
+                onDeleted={() => setSelectedId(null)}
+              />
+            )}
+            {tab === "search" && <SearchPanel onSelect={handleSelect} />}
+            {tab === "ask" && <AskPanel onSelect={handleSelect} />}
+          </div>
+        </main>
       </div>
+
+      {addOpen && <QuickAddModal parentId={addParent} onClose={closeAdd} />}
     </div>
-  )
+  );
 }

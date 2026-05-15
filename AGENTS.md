@@ -309,12 +309,14 @@ alembic upgrade head
 - Models: [backend/app/models/](backend/app/models/) (plus [backend/app/models.py](backend/app/models.py))
 - DB session: [backend/app/database.py](backend/app/database.py) — reads `DATABASE_URL`, defaults to the docker-compose MySQL URL
 - AI providers: [backend/app/ai/](backend/app/ai/) — `LLMProvider` interface + `LocalProvider` / `AnthropicProvider`
-- Frontend pages: [frontend/src/pages/](frontend/src/pages/)
-- Frontend components: [frontend/src/components/](frontend/src/components/)
+- Frontend layout: [frontend/src/App.jsx](frontend/src/App.jsx) — header + tree sidebar + tabbed main panel
+- Frontend components: [frontend/src/components/](frontend/src/components/) — `TreeView` (with @dnd-kit reparenting), `NodeDetail`, `SearchPanel`, `AskPanel`, `QuickAddModal`
+- Frontend data layer: [frontend/src/api.js](frontend/src/api.js) (thin fetch wrapper) + [frontend/src/queries.js](frontend/src/queries.js) (TanStack Query hooks)
 
 ## Gotchas
 
 - **Two venvs exist** (`.venv/` and `venv/`). Only `.venv/` is active. Ignore `venv/`.
 - **Vite port fallback**: if `:5173` is in use, Vite picks `:5174` (visible in [frontend.log](frontend.log)). Update the URL you open accordingly.
 - **Frontend API base URL**: defaults to `http://127.0.0.1:8000`. Override with `VITE_API_URL` if the backend isn't on localhost:8000.
+- **Frontend auth token**: `VITE_WHEREISIT_TOKEN` at build time gets injected as `Authorization: Bearer …`. Leave unset when the backend is in dev (open) mode.
 - **CORS**: the backend enables CORS for all origins in dev — see [backend/app/main.py](backend/app/main.py).
