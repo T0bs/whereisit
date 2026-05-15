@@ -331,6 +331,58 @@ def test_local_http_error_wraps():
         p.generate([Message(role="user", content="hi")])
 
 
+def test_local_embed_hits_ollama_embed_endpoint():
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"embeddings": [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]},
+        )
+
+    p = LocalProvider(client=_ollama_client(handler), model="llama3.1:8b")
+    vectors = p.embed(["hello", "world"])
+
+    assert vectors == [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
+    assert captured["url"].endswith("/api/embed")
+    assert captured["body"]["model"] == "nomic-embed-text"
+    assert captured["body"]["input"] == ["hello", "world"]
+
+
+def test_local_embed_empty_input_skips_http():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("HTTP should not be hit for empty input")
+
+    p = LocalProvider(client=_ollama_client(handler))
+    assert p.embed([]) == []
+
+
+def test_local_embed_count_mismatch_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"embeddings": [[1.0, 2.0]]})
+
+    p = LocalProvider(client=_ollama_client(handler))
+    with pytest.raises(LLMError, match="vectors for"):
+        p.embed(["a", "b", "c"])
+
+
+def test_local_embed_http_error_wraps():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": "model not found"})
+
+    p = LocalProvider(client=_ollama_client(handler))
+    with pytest.raises(LLMError, match="Ollama embed HTTP error"):
+        p.embed(["hi"])
+
+
+def test_anthropic_embed_raises_llm_error():
+    p = AnthropicProvider(client=SimpleNamespace(messages=None))
+    with pytest.raises(LLMError, match="does not support embeddings"):
+        p.embed(["hi"])
+
+
 def test_local_tool_use_loop_max_iterations():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

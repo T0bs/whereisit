@@ -66,6 +66,7 @@ def client(_test_database):
 
 
 _TRUNCATE_TABLES = (
+    "embeddings",
     "node_properties",
     "node_tags",
     "nodes",

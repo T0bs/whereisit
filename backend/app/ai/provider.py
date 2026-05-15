@@ -37,6 +37,7 @@ class LLMError(Exception):
 
 class LLMProvider(ABC):
     name: str
+    embed_model: str | None = None
 
     @abstractmethod
     def generate(
@@ -58,3 +59,7 @@ class LLMProvider(ABC):
         max_iterations: int = 8,
     ) -> GenerateResult:
         ...
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        """Return one embedding vector per input text. Order matches input."""
+        raise LLMError(f"{type(self).__name__} does not support embeddings")

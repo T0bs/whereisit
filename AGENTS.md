@@ -229,11 +229,36 @@ Cascade:
 
 Every tool call appears in the response's `tool_calls: [{tool, input, output, is_error}]` array so you can audit what the assistant did. The MCP tool `ask` wraps the endpoint.
 
+### Embeddings & semantic search (M11)
+
+Search has three modes. `/search?mode=keyword` is the FULLTEXT path from M5. `mode=semantic` and `mode=hybrid` rely on the `embeddings` table.
+
+```bash
+# One-time: backfill missing/stale rows. Re-run after bulk imports.
+scripts/wii_embed                       # default model from LLM_EMBED_MODEL
+scripts/wii_embed --force               # re-embed everything
+scripts/wii_embed status                # per-model row counts
+
+# Or via REST:
+curl -X POST http://127.0.0.1:8000/embeddings/backfill -d '{}'
+curl http://127.0.0.1:8000/embeddings   # per-model row counts
+
+# Search modes
+curl 'http://127.0.0.1:8000/search?q=something+to+hit+nails+with&mode=semantic'
+curl 'http://127.0.0.1:8000/search?q=hammer&mode=hybrid'
+```
+
+- **`mode=semantic`** — query is embedded, ranked by cosine similarity against stored vectors. Finds conceptual neighbours even when no words overlap.
+- **`mode=hybrid`** — runs keyword + semantic in parallel, fuses with Reciprocal Rank Fusion (`score = Σ 1/(60+rank)`). Robust to scale differences; no weight tuning.
+
+Embeddings are produced by `LocalProvider.embed()` against Ollama's `/api/embed`, using `LLM_EMBED_MODEL` (default `nomic-embed-text`). Semantic search always uses the local provider — Anthropic has no embeddings API. `AnthropicProvider.embed()` raises `LLMError`.
+
 Install Ollama for the local path (one-time):
 
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh
-ollama pull llama3.1:8b
+ollama pull llama3.1:8b           # chat / tool-use (M8-M10)
+ollama pull nomic-embed-text      # embeddings (M11)
 ```
 
 ## Tests

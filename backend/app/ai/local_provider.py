@@ -15,13 +15,41 @@ class LocalProvider(LLMProvider):
         *,
         base_url: str = "http://127.0.0.1:11434",
         model: str = "llama3.1:8b",
+        embed_model: str = "nomic-embed-text",
         timeout: float = 120.0,
         client: httpx.Client | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.embed_model = embed_model
         self.timeout = timeout
         self._client = client
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        client = self._client or httpx.Client(timeout=self.timeout)
+        owns_client = self._client is None
+        try:
+            response = client.post(
+                f"{self.base_url}/api/embed",
+                json={"model": self.embed_model, "input": texts},
+            )
+            response.raise_for_status()
+            data = response.json()
+        except httpx.HTTPError as exc:
+            raise LLMError(f"Ollama embed HTTP error: {exc}") from exc
+        finally:
+            if owns_client:
+                client.close()
+
+        vectors = data.get("embeddings")
+        if not isinstance(vectors, list) or len(vectors) != len(texts):
+            raise LLMError(
+                f"Ollama embed returned {len(vectors) if isinstance(vectors, list) else '?'} "
+                f"vectors for {len(texts)} inputs"
+            )
+        return [[float(x) for x in v] for v in vectors]
 
     def generate(
         self,
