@@ -98,7 +98,7 @@ Each milestone lands a working slice of the end-state design. The git workflow (
 - [x] **M4 — Tags, kinds, properties APIs.** Endpoints for the reference + join layers; create is idempotent by name/slug.
   - *Considerations:* property value validation happens in the app layer based on `property_keys.value_type`.
 
-- [ ] **M5 — Search.** `GET /search?q=&parent=&kind=&tag=&mode=keyword`. MySQL FULLTEXT over `name + description`. Each result carries `score`, `match_reason`, `path` (ancestors).
+- [x] **M5 — Search.** `GET /search?q=&parent=&kind=&tag=&mode=keyword`. MySQL FULLTEXT over `name + description`. Each result carries `score`, `match_reason`, `path` (ancestors).
   - *Considerations:* response shape supports future `mode=semantic|hybrid` without changes. Compute ancestor path on the fly first; materialize a `path` column only if it gets slow.
 
 - [ ] **M6 — `scripts/wii` CLI.** Python single-file CLI wrapping the API. Commands: `add`, `find`, `tree`, `move`, `tag`, `prop`, `rm`. Reads `WHEREISIT_TOKEN`, `WHEREISIT_API_URL` (default `http://127.0.0.1:8000`).
