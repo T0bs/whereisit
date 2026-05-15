@@ -357,6 +357,44 @@ def delete_property(node_id: int, key: str) -> str:
 
 
 @mcp.tool()
+def ask(question: str, confirm_remote: bool = False, max_iterations: int = 8) -> dict:
+    """Ask a natural-language question about the inventory.
+
+    Runs a cascade: (1) literal FULLTEXT search after stopword stripping —
+    cheap path for "where is my hammer?"-style questions; (2) local LLM
+    (Ollama) tool-use loop over the read+write inventory tools when tier 1
+    finds nothing; (3) Anthropic cloud only when `confirm_remote=True` AND
+    `WHEREISIT_CLOUD_ENABLED=true` on the server.
+
+    The LLM has full read access (search, get_node, get_children, get_path,
+    list_kinds, list_tags, list_root_nodes) plus write tools (add_node,
+    update_node, move_node, delete_node, add_tag, remove_tag,
+    set_property). The system prompt instructs the model not to call write
+    tools unless the user explicitly asks. Every tool call appears in
+    `tool_calls` so you can audit what happened.
+
+    Args:
+        question: Free-text question. Required.
+        confirm_remote: Opt-in for tier 3 (Anthropic). Returns 400 if the
+            server kill switch (`WHEREISIT_CLOUD_ENABLED`) is off.
+        max_iterations: Bound on LLM ↔ tool round trips (1–20, default 8).
+
+    Returns: {answer, tier_used, tool_calls: [{tool, input, output,
+        is_error}], cloud_enabled, message?}. `tier_used` is one of
+        "search" (tier 1), "local", "anthropic", "exhausted".
+    """
+    return _call(
+        "POST",
+        "/ai/ask",
+        body={
+            "question": question,
+            "confirm_remote": confirm_remote,
+            "max_iterations": max_iterations,
+        },
+    )
+
+
+@mcp.tool()
 def suggest_placement(
     description: str,
     tags: Optional[list[str]] = None,

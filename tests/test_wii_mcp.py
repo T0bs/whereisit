@@ -113,6 +113,29 @@ def test_list_kinds_includes_seeds(mcp):
     assert {"room", "tool", "drawer", "item"}.issubset(slugs)
 
 
+def test_ask_via_mcp_tier1_keyword(mcp, monkeypatch):
+    """Tier-1 literal search path — no LLM involvement, full path mentioned."""
+    monkeypatch.delenv("WHEREISIT_CLOUD_ENABLED", raising=False)
+    garage = mcp.add_node(name="Garage", kind="room", can_contain=True)
+    cupboard = mcp.add_node(
+        name="Tool cupboard",
+        kind="cupboard",
+        parent_id=garage["id"],
+        can_contain=True,
+    )
+    mcp.add_node(name="Claw hammer", kind="tool", parent_id=cupboard["id"])
+
+    result = mcp.ask(question="where is my hammer?")
+    assert result["tier_used"] == "search"
+    assert "Claw hammer" in result["answer"]
+    assert result["tool_calls"] == []
+    assert result["cloud_enabled"] is False
+
+    # Cloud off + confirm_remote=True surfaces the 400 as a RuntimeError
+    with pytest.raises(RuntimeError, match="cloud_disabled"):
+        mcp.ask(question="anything", confirm_remote=True)
+
+
 def test_suggest_placement_via_mcp(mcp, monkeypatch):
     """The MCP tool forwards to /ai/suggest-placement and surfaces the cascade tier."""
     garage = mcp.add_node(name="Garage", kind="room", can_contain=True)
