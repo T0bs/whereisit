@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Kind, Node, Tag
+from ..models import Kind, Node, NodeProperty, PropertyKey, Tag
 from ..schemas import (
     KindRef,
     NodeCreate,
@@ -13,9 +13,13 @@ from ..schemas import (
     NodeSummary,
     NodeUpdate,
     PropertyRef,
+    PropertyValueSet,
+    TagCreate,
     TagRef,
     TreeNode,
 )
+
+_VALUE_TYPES = ("string", "int", "float", "bool")
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
 
@@ -279,6 +283,189 @@ def get_tree(
     db: Session = Depends(get_db),
 ):
     return _build_tree(db, _node_or_404(db, node_id), depth)
+
+
+# ---------- node tags ----------
+
+
+@router.post("/{node_id}/tags", response_model=TagRef)
+def add_tag_to_node(
+    node_id: int,
+    body: TagCreate,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    """Add a tag to a node by name. Creates the tag if it doesn't exist."""
+    node = _node_or_404(db, node_id)
+    tag = db.execute(select(Tag).where(Tag.name == body.name)).scalar_one_or_none()
+    created = False
+    if tag is None:
+        tag = Tag(name=body.name)
+        db.add(tag)
+        db.flush()
+        created = True
+    if tag not in node.tags:
+        node.tags.append(tag)
+        created = True
+    db.commit()
+    db.refresh(tag)
+    response.status_code = (
+        status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    )
+    return TagRef.model_validate(tag)
+
+
+@router.delete("/{node_id}/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_tag_from_node(
+    node_id: int, tag_id: int, db: Session = Depends(get_db)
+):
+    node = _node_or_404(db, node_id)
+    tag = db.get(Tag, tag_id)
+    if tag is None or tag not in node.tags:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "tag is not assigned to this node"
+        )
+    node.tags.remove(tag)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------- node properties ----------
+
+
+def _coerce_value(value: object, value_type: str) -> str:
+    """Stringify `value` for storage, validating against `value_type`."""
+    if value_type == "string":
+        return str(value)
+    if value_type == "int":
+        if isinstance(value, bool):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"value {value!r} is bool, not int",
+            )
+        try:
+            return str(int(value))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"value {value!r} not parseable as int",
+            )
+    if value_type == "float":
+        if isinstance(value, bool):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"value {value!r} is bool, not float",
+            )
+        try:
+            return str(float(value))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"value {value!r} not parseable as float",
+            )
+    if value_type == "bool":
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        s = str(value).lower()
+        if s in ("true", "1"):
+            return "true"
+        if s in ("false", "0"):
+            return "false"
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"value {value!r} not parseable as bool",
+        )
+    raise HTTPException(
+        status.HTTP_400_BAD_REQUEST, f"unknown value_type: {value_type}"
+    )
+
+
+@router.get("/{node_id}/properties", response_model=List[PropertyRef])
+def list_node_properties(node_id: int, db: Session = Depends(get_db)):
+    node = _node_or_404(db, node_id)
+    return [
+        PropertyRef(key=p.key.key, value=p.value, value_type=p.key.value_type)
+        for p in node.properties
+    ]
+
+
+@router.put("/{node_id}/properties/{key}", response_model=PropertyRef)
+def set_node_property(
+    node_id: int,
+    key: str,
+    body: PropertyValueSet,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    """Upsert a property on a node. Creates the property_key on first use.
+
+    `value_type` in the body is only used when the property_key is newly created;
+    once a key exists, its type is fixed (DELETE the property_key elsewhere if
+    you need to change it).
+    """
+    node = _node_or_404(db, node_id)
+
+    pk = db.execute(
+        select(PropertyKey).where(PropertyKey.key == key)
+    ).scalar_one_or_none()
+    if pk is None:
+        value_type = body.value_type or "string"
+        if value_type not in _VALUE_TYPES:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"invalid value_type: {value_type}",
+            )
+        pk = PropertyKey(key=key, value_type=value_type)
+        db.add(pk)
+        db.flush()
+
+    value_str = _coerce_value(body.value, pk.value_type)
+
+    np = db.execute(
+        select(NodeProperty).where(
+            NodeProperty.node_id == node.id,
+            NodeProperty.key_id == pk.id,
+        )
+    ).scalar_one_or_none()
+    created = False
+    if np is None:
+        np = NodeProperty(node_id=node.id, key_id=pk.id, value=value_str)
+        db.add(np)
+        created = True
+    else:
+        np.value = value_str
+
+    db.commit()
+    db.refresh(np)
+    response.status_code = (
+        status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    )
+    return PropertyRef(key=pk.key, value=np.value, value_type=pk.value_type)
+
+
+@router.delete(
+    "/{node_id}/properties/{key}", status_code=status.HTTP_204_NO_CONTENT
+)
+def delete_node_property(node_id: int, key: str, db: Session = Depends(get_db)):
+    node = _node_or_404(db, node_id)
+    pk = db.execute(
+        select(PropertyKey).where(PropertyKey.key == key)
+    ).scalar_one_or_none()
+    np = None
+    if pk is not None:
+        np = db.execute(
+            select(NodeProperty).where(
+                NodeProperty.node_id == node.id,
+                NodeProperty.key_id == pk.id,
+            )
+        ).scalar_one_or_none()
+    if np is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"property {key} is not set on this node"
+        )
+    db.delete(np)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 def _build_tree(db: Session, node: Node, depth: int) -> TreeNode:

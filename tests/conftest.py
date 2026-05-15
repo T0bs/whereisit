@@ -13,6 +13,8 @@ import pymysql
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
+from sqlalchemy import event
+from sqlalchemy.orm import Session
 
 
 _ROOT_CONN_KWARGS = {
@@ -63,31 +65,40 @@ def client(_test_database):
         yield c
 
 
-# Tables that hold per-test state. `kinds` stays — it's seeded by the migration
-# and many tests reference its rows.
-_TRUNCATE_TABLES = (
-    "node_properties",
-    "node_tags",
-    "nodes",
-    "tags",
-    "property_keys",
-)
-
-
 @pytest.fixture(autouse=True)
-def _clean_node_state(_test_database):
-    """Empty the per-test tables before each test so writes can't leak."""
-    from sqlalchemy import text
+def _isolated_db(_test_database):
+    """Wrap each test in a transaction that's rolled back at the end.
 
-    from backend.app.database import SessionLocal
+    All sessions handed to the FastAPI app via `get_db` are bound to the same
+    test-scoped connection. Handler commits land on a SAVEPOINT that's restarted
+    after each commit, so the outer transaction stays open for the rollback.
+    """
+    from backend.app import database as db_module
+    from backend.app.main import app
 
-    db = SessionLocal()
+    connection = db_module.engine.connect()
+    outer = connection.begin()
+    session = Session(bind=connection, autoflush=False, autocommit=False, future=True)
+    nested = connection.begin_nested()
+
+    @event.listens_for(session, "after_transaction_end")
+    def _restart_savepoint(sess, trans):
+        nonlocal nested
+        if not nested.is_active:
+            nested = connection.begin_nested()
+
+    def _override_get_db():
+        try:
+            yield session
+        finally:
+            pass
+
+    app.dependency_overrides[db_module.get_db] = _override_get_db
     try:
-        db.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
-        for table in _TRUNCATE_TABLES:
-            db.execute(text(f"TRUNCATE TABLE `{table}`"))
-        db.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
-        db.commit()
+        yield session
     finally:
-        db.close()
-    yield
+        app.dependency_overrides.pop(db_module.get_db, None)
+        session.close()
+        if outer.is_active:
+            outer.rollback()
+        connection.close()

@@ -95,7 +95,7 @@ Each milestone lands a working slice of the end-state design. The git workflow (
 - [x] **M3 — Core `/nodes` API (end-state shape).** Replace every existing router. CRUD + `/children`, `/path`, `/tree`. PATCH not PUT.
   - *Considerations:* never auto-expand children in the default node response (keep it lean); document responses in OpenAPI from day one.
 
-- [ ] **M4 — Tags, kinds, properties APIs.** Endpoints for the reference + join layers; create is idempotent by name/slug.
+- [x] **M4 — Tags, kinds, properties APIs.** Endpoints for the reference + join layers; create is idempotent by name/slug.
   - *Considerations:* property value validation happens in the app layer based on `property_keys.value_type`.
 
 - [ ] **M5 — Search.** `GET /search?q=&parent=&kind=&tag=&mode=keyword`. MySQL FULLTEXT over `name + description`. Each result carries `score`, `match_reason`, `path` (ancestors).
