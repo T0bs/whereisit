@@ -119,8 +119,8 @@ Each milestone lands a working slice of the end-state design. The git workflow (
 - [x] **M11 — Embeddings.** `embeddings` table + a backfill job that finds nodes where `updated_at > embedded_at`. Search gains `mode=semantic|hybrid`. `LLMProvider` extended with `embed(texts)`; `LocalProvider` calls Ollama `/api/embed` (default `nomic-embed-text`, overridable via `LLM_EMBED_MODEL`); `AnthropicProvider.embed()` raises `LLMError`. Backfill exposed as `scripts/wii_embed` CLI + `POST /embeddings/backfill` endpoint. Hybrid mode fuses keyword + semantic via Reciprocal Rank Fusion (no weight tuning needed).
   - *Considerations:* vectors are JSON-serialized in a TEXT column, cosine computed in Python — fine for thousands of nodes; upgrade to pgvector / sqlite-vss / Qdrant when scale demands; semantic search hard-uses the local provider since Anthropic has no embeddings API.
 
-- [ ] **M12 — Web UI rebuild.** Throw out the current React components; build a minimal new UI: tree view of nodes, search bar wired to `/search`, quick-add modal, "ask" panel calling `/ai/ask`. Drag-drop reparenting if it's cheap.
-  - *Considerations:* this is where the frontend earns its keep; before this milestone, curl + the CLI is enough.
+- [x] **M12 — Web UI rebuild.** Throws out the pre-M2 React components (Items/Containers/Placements). New minimal UI on React 18 + Vite + Tailwind + TanStack Query + @dnd-kit: header with quick-add; left sidebar with lazy-loaded tree (`/nodes/{id}/children` per expand) and drag-drop reparenting (drop on any `can_contain` node → PATCH parent_id; root drop zone promotes to root); main area with tabs — Detail (rename, tag add/remove, properties, delete + cascade), Search (keyword/semantic/hybrid mode toggle), Ask (`/ai/ask` with tier badge and full tool-call trace).
+  - *Considerations:* `VITE_API_URL` (default `http://127.0.0.1:8000`) and `VITE_WHEREISIT_TOKEN` are read at build time; auth is whatever the backend's `WHEREISIT_TOKEN` policy says. No frontend tests in this milestone — UI verification is browser-side. Production bundle is ~77KB gzipped JS + 3.5KB CSS.
 
 ## Open questions
 
