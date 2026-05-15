@@ -159,6 +159,37 @@ curl -H "Authorization: Bearer $WHEREISIT_TOKEN" http://localhost:8000/items/
 
 The check lives in a single middleware function so swapping for JWT/OAuth later is a one-file change.
 
+## AI providers
+
+[`backend/app/ai/`](backend/app/ai/) exposes an `LLMProvider` abstraction with `generate(messages)` and `tool_use_loop(messages, tools, on_tool_call)`. Two concrete providers ship out of the box:
+
+- **`LocalProvider`** (default) — Ollama HTTP at `LLM_LOCAL_URL` (default `http://127.0.0.1:11434`), model `LLM_LOCAL_MODEL` (default `llama3.1:8b`). Zero marginal cost.
+- **`AnthropicProvider`** — `claude-haiku-4-5` by default, override via `ANTHROPIC_MODEL`; requires `ANTHROPIC_API_KEY`. Calls are billed against the API key's account, separate from any Claude Code subscription.
+
+Pick at runtime with `LLM_PROVIDER=local|anthropic` (default `local`):
+
+```python
+from backend.app.ai import get_provider, Message
+
+provider = get_provider()                             # honours LLM_PROVIDER env var
+result = provider.generate(
+    [Message(role="user", content="Where can I find a hammer?")],
+    system="You answer inventory questions.",
+)
+print(result.text, result.usage)
+```
+
+`AnthropicProvider` caches the system prompt by default (`cache_system=True` → top-level `cache_control: ephemeral`), which M9/M10 rely on for cheap repeat calls. `LocalProvider` ignores caching arguments.
+
+The cascade orchestration — DB lookup → local LLM → cloud (opt-in with explicit confirmation) — lives in the `/ai/*` endpoints (M9/M10). No LLM SDK call should appear outside [backend/app/ai/](backend/app/ai/).
+
+Install Ollama for the local path (one-time):
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull llama3.1:8b
+```
+
 ## Tests
 
 Backend tests live in [tests/](tests/) and run against the docker-compose MySQL in a dedicated `whereisit_test` database (created/dropped per session by the fixture in [tests/conftest.py](tests/conftest.py)).
@@ -206,6 +237,7 @@ alembic upgrade head
 - Routers: [backend/app/routers/](backend/app/routers/) — `items`, `containers`, `placements`, `tags`, `views`
 - Models: [backend/app/models/](backend/app/models/) (plus [backend/app/models.py](backend/app/models.py))
 - DB session: [backend/app/database.py](backend/app/database.py) — reads `DATABASE_URL`, defaults to the docker-compose MySQL URL
+- AI providers: [backend/app/ai/](backend/app/ai/) — `LLMProvider` interface + `LocalProvider` / `AnthropicProvider`
 - Frontend pages: [frontend/src/pages/](frontend/src/pages/)
 - Frontend components: [frontend/src/components/](frontend/src/components/)
 
