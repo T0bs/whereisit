@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""wii_embed — backfill embeddings for the whereisit inventory.
+
+Thin wrapper over POST /embeddings/backfill. Stdlib-only so it runs without
+the venv. Reads WHEREISIT_API_URL (default http://127.0.0.1:8000) and
+WHEREISIT_TOKEN from env, like the main `wii` CLI.
+
+Examples:
+  scripts/wii_embed                    # backfill stale rows with default model
+  scripts/wii_embed --model nomic-embed-text
+  scripts/wii_embed --force            # re-embed everything
+  scripts/wii_embed status             # show per-model row counts
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import Any, Optional
+
+
+def _request(
+    method: str,
+    path: str,
+    *,
+    body: Optional[dict] = None,
+    base_url: Optional[str] = None,
+    token: Optional[str] = None,
+) -> tuple[int, Any]:
+    base = (base_url or os.getenv("WHEREISIT_API_URL", "http://127.0.0.1:8000")).rstrip("/")
+    headers = {"Accept": "application/json"}
+    tok = token if token is not None else os.getenv("WHEREISIT_TOKEN")
+    if tok:
+        headers["Authorization"] = f"Bearer {tok}"
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(base + path, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            raw = resp.read().decode() if resp.length != 0 else ""
+            return resp.status, (json.loads(raw) if raw else None)
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode()
+        try:
+            payload = json.loads(raw) if raw else None
+        except json.JSONDecodeError:
+            payload = raw
+        return exc.code, payload
+
+
+def cmd_backfill(args: argparse.Namespace) -> None:
+    body: dict = {"batch_size": args.batch_size, "force": args.force}
+    if args.model:
+        body["model"] = args.model
+    code, payload = _request("POST", "/embeddings/backfill", body=body)
+    if code >= 400:
+        sys.stderr.write(f"backfill failed (HTTP {code}): {payload}\n")
+        sys.exit(1)
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return
+    print(
+        f"model={payload['model']}  "
+        f"embedded={payload['embedded']}  "
+        f"skipped_fresh={payload['skipped_fresh']}  "
+        f"failed={payload['failed']}  "
+        f"total_seen={payload['total_seen']}"
+    )
+
+
+def cmd_status(args: argparse.Namespace) -> None:
+    code, payload = _request("GET", "/embeddings")
+    if code >= 400:
+        sys.stderr.write(f"status failed (HTTP {code}): {payload}\n")
+        sys.exit(1)
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return
+    if not payload:
+        print("no embeddings yet — run `wii_embed` to backfill")
+        return
+    for row in payload:
+        print(f"  {row['model']:32s}  rows={row['rows']}")
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="wii_embed", description=__doc__)
+    p.add_argument("--json", action="store_true", help="machine-readable output")
+    sub = p.add_subparsers(dest="cmd")
+
+    s_backfill = sub.add_parser("backfill", help="embed stale or missing rows")
+    s_backfill.add_argument("--model", help="override LLM_EMBED_MODEL")
+    s_backfill.add_argument("--batch-size", type=int, default=32)
+    s_backfill.add_argument(
+        "--force", action="store_true", help="re-embed even fresh rows"
+    )
+    s_backfill.set_defaults(func=cmd_backfill)
+
+    s_status = sub.add_parser("status", help="show per-model embedding counts")
+    s_status.set_defaults(func=cmd_status)
+
+    # Default subcommand: backfill
+    p.set_defaults(func=cmd_backfill, model=None, batch_size=32, force=False)
+
+    return p
+
+
+def main(argv: Optional[list[str]] = None) -> None:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

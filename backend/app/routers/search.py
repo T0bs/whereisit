@@ -5,6 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from ..ai import get_provider
+from ..ai.embeddings import reciprocal_rank_fusion, semantic_search
+from ..ai.provider import LLMError
 from ..database import get_db
 from ..models import Kind, Node, Tag
 from ..schemas import KindRef, NodeSummary, SearchResult
@@ -12,8 +15,7 @@ from ..schemas import KindRef, NodeSummary, SearchResult
 router = APIRouter(tags=["search"])
 
 
-SUPPORTED_MODES = {"keyword"}
-# Semantic / hybrid modes will land in M11.
+SUPPORTED_MODES = {"keyword", "semantic", "hybrid"}
 
 _FT_OPERATOR_STRIP = re.compile(r"[+\-<>~*\"()@]")
 
@@ -113,6 +115,18 @@ def search(
             f"(available: {sorted(SUPPORTED_MODES)})",
         )
 
+    if mode in ("semantic", "hybrid"):
+        return _search_with_embeddings(
+            db=db,
+            mode=mode,
+            q=q,
+            parent=parent,
+            kind=kind,
+            tag=tag,
+            limit=limit,
+            offset=offset,
+        )
+
     use_fulltext = q is not None and q.strip() != ""
     scores: Dict[int, float] = {}
     if use_fulltext:
@@ -175,3 +189,117 @@ def search(
         )
         for node in page
     ]
+
+
+# ---------- semantic / hybrid (M11) ----------
+
+
+def _search_with_embeddings(
+    *,
+    db: Session,
+    mode: str,
+    q: Optional[str],
+    parent: Optional[str],
+    kind: Optional[str],
+    tag: Optional[str],
+    limit: int,
+    offset: int,
+) -> List[SearchResult]:
+    if not q or not q.strip():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"mode={mode} requires a non-empty q",
+        )
+
+    provider = get_provider("local")
+    try:
+        semantic = semantic_search(
+            db=db,
+            provider=provider,
+            query=q,
+            parent=parent,
+            kind=kind,
+            tag=tag,
+            limit=max(limit + offset, 200),
+        )
+    except LLMError as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            f"embedding provider unavailable: {exc}",
+        )
+
+    if mode == "semantic":
+        ranked: List[tuple[int, float]] = semantic
+        reason = f"cosine similarity ({provider.embed_model})"
+    else:
+        boolean_term = _build_boolean_term(q)
+        keyword_scores: Dict[int, float] = (
+            _fulltext_scores(db, boolean_term) if boolean_term else {}
+        )
+        candidate_ids = _filtered_keyword_ids(
+            db, keyword_scores, parent=parent, kind=kind, tag=tag
+        )
+        keyword_ranked = sorted(
+            candidate_ids, key=lambda nid: (-keyword_scores.get(nid, 0.0), nid)
+        )
+        semantic_ranked = [nid for nid, _ in semantic]
+        ranked = reciprocal_rank_fusion(keyword_ranked, semantic_ranked)
+        reason = "RRF (keyword + semantic)"
+
+    page = ranked[offset : offset + limit]
+    if not page:
+        return []
+
+    node_ids = [nid for nid, _ in page]
+    nodes_by_id = {
+        n.id: n
+        for n in db.execute(select(Node).where(Node.id.in_(node_ids))).scalars().all()
+    }
+    paths = _batch_paths(db, node_ids)
+
+    results: List[SearchResult] = []
+    for node_id, score in page:
+        node = nodes_by_id.get(node_id)
+        if node is None:
+            continue  # row referenced by embedding but node since deleted
+        results.append(
+            SearchResult(
+                id=node.id,
+                name=node.name,
+                kind=KindRef.model_validate(node.kind),
+                parent_id=node.parent_id,
+                can_contain=node.can_contain,
+                quantity=node.quantity,
+                score=score,
+                match_reason=reason,
+                path=[NodeSummary.model_validate(n) for n in paths.get(node.id, [])],
+            )
+        )
+    return results
+
+
+def _filtered_keyword_ids(
+    db: Session,
+    scores: Dict[int, float],
+    *,
+    parent: Optional[str],
+    kind: Optional[str],
+    tag: Optional[str],
+) -> Set[int]:
+    if not scores:
+        return set()
+    stmt = select(Node.id).where(Node.id.in_(scores.keys()))
+    if parent is not None:
+        if parent == "root":
+            stmt = stmt.where(Node.parent_id.is_(None))
+        else:
+            try:
+                pid = int(parent)
+            except ValueError:
+                return set()
+            stmt = stmt.where(Node.parent_id == pid)
+    if kind is not None:
+        stmt = stmt.join(Node.kind).where(Kind.slug == kind)
+    if tag is not None:
+        stmt = stmt.join(Node.tags).where(Tag.name == tag)
+    return {row[0] for row in db.execute(stmt).all()}
