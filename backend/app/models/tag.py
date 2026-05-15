@@ -1,21 +1,28 @@
-from sqlalchemy import Table, Column, Integer, String, ForeignKey
-from sqlalchemy.orm import relationship
+from typing import List, TYPE_CHECKING
+
+from sqlalchemy import Column, ForeignKey, Integer, String, Table
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from .base import Base
 
+if TYPE_CHECKING:
+    from .node import Node
 
-# association table
-item_tags = Table(
-    'item_tags',
+
+node_tags = Table(
+    "node_tags",
     Base.metadata,
-    Column('item_id', Integer, ForeignKey('items.id'), primary_key=True),
-    Column('tag_id', Integer, ForeignKey('tags.id'), primary_key=True),
+    Column("node_id", Integer, ForeignKey("nodes.id", ondelete="CASCADE"), primary_key=True),
+    Column("tag_id", Integer, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True),
 )
 
 
 class Tag(Base):
-    __tablename__ = 'tags'
+    __tablename__ = "tags"
 
-    id = Column(Integer, primary_key=True)
-    name = Column(String(100), nullable=False, unique=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
 
-    items = relationship('Item', secondary=item_tags, back_populates='tag_objs')
+    nodes: Mapped[List["Node"]] = relationship(
+        secondary=node_tags, back_populates="tags"
+    )

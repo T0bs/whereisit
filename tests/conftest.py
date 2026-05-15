@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 # Point the app at a dedicated test database before any backend module is imported.
 # Override via WHEREISIT_TEST_DATABASE_URL when running against a different host.
@@ -9,6 +10,8 @@ os.environ["DATABASE_URL"] = os.getenv(
 
 import pytest
 import pymysql
+from alembic import command
+from alembic.config import Config
 from fastapi.testclient import TestClient
 
 
@@ -20,6 +23,7 @@ _ROOT_CONN_KWARGS = {
 }
 _TEST_DB = os.getenv("WHEREISIT_TEST_DB_NAME", "whereisit_test")
 _APP_USER = os.getenv("WHEREISIT_TEST_DB_APP_USER", "whereisit")
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _run_root(*statements: str) -> None:
@@ -33,6 +37,12 @@ def _run_root(*statements: str) -> None:
         cn.close()
 
 
+def _apply_migrations() -> None:
+    cfg = Config(str(_REPO_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(_REPO_ROOT / "alembic"))
+    command.upgrade(cfg, "head")
+
+
 @pytest.fixture(scope="session")
 def _test_database():
     _run_root(
@@ -40,6 +50,7 @@ def _test_database():
         f"GRANT ALL PRIVILEGES ON `{_TEST_DB}`.* TO '{_APP_USER}'@'%'",
         "FLUSH PRIVILEGES",
     )
+    _apply_migrations()
     yield
     _run_root(f"DROP DATABASE IF EXISTS `{_TEST_DB}`")
 
