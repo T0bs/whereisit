@@ -83,10 +83,10 @@ AI
 
 Each milestone lands a working slice of the end-state design. The git workflow (branch off `master`, PR per milestone) is documented in [AGENTS.md](AGENTS.md).
 
-- [ ] **M0 — Pytest harness.** Add `pytest` to `requirements.txt`, set up a `tests/` dir with a fixture that boots the FastAPI app against the docker-compose MySQL. One smoke test (`/health` → 200).
+- [x] **M0 — Pytest harness.** Add `pytest` to `requirements.txt`, set up a `tests/` dir with a fixture that boots the FastAPI app against the docker-compose MySQL. One smoke test (`/health` → 200).
   - *Considerations:* drop the stale `venv/` while we're in here; keep test DB isolation in mind (separate DB name, or `TRUNCATE` between tests).
 
-- [ ] **M1 — Token auth middleware.** Reads `WHEREISIT_TOKEN`; if set, every endpoint except `/health` requires `Authorization: Bearer <token>`. If unset, dev mode (open).
+- [x] **M1 — Token auth middleware.** Reads `WHEREISIT_TOKEN`; if set, every endpoint except `/health` requires `Authorization: Bearer <token>`. If unset, dev mode (open).
   - *Considerations:* single FastAPI dependency so swapping for JWT/OAuth later is a one-file change; document the env var in AGENTS.md.
 
 - [ ] **M2 — Schema reset to the unified model.** Drop every existing migration and table; introduce a fresh initial migration that creates `kinds`, `nodes`, `tags`, `node_tags`, `property_keys`, `node_properties`. Seed `kinds` with `room`, `building`, `cupboard`, `shelf`, `drawer`, `box`, `bag`, `item`, `tool`, `consumable`. FULLTEXT index on `nodes(name, description)`.
