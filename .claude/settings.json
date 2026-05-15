@@ -5,7 +5,9 @@
       "Bash(.venv/bin/pytest tests/test_wii_mcp.py -v)",
       "Bash(timeout 3 *)",
       "Bash(echo \"Exit code: $? \\(124 = timed out which means it was running cleanly waiting for stdin\\)\")",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "mcp__whereisit__list_root_nodes",
+      "mcp__whereisit__list_tags"
     ]
   }
 }

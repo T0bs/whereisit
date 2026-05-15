@@ -22,7 +22,11 @@ target_metadata = models.Base.metadata
 
 
 def get_url():
-    return os.getenv("DATABASE_URL") or config.get_main_option("sqlalchemy.url") or "sqlite:///./whereisit.db"
+    return (
+        os.getenv("DATABASE_URL")
+        or config.get_main_option("sqlalchemy.url")
+        or "mysql+pymysql://whereisit:whereisitpw@127.0.0.1:3306/whereisit"
+    )
 
 
 def run_migrations_offline():

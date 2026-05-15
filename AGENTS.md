@@ -8,7 +8,7 @@ Guide for coding agents (and humans) working in this repo. Copy-paste recipes fo
 
 - **Backend**: FastAPI on `:8000` — entrypoint [backend/app/main.py](backend/app/main.py)
 - **Frontend**: React + Vite on `:5173` — entrypoint [frontend/src/App.jsx](frontend/src/App.jsx)
-- **DB**: MySQL 8 via [docker-compose.yml](docker-compose.yml). SQLite fallback (`whereisit.db`) when `DATABASE_URL` is unset.
+- **DB**: MySQL 8 via [docker-compose.yml](docker-compose.yml). Backend defaults to the docker-compose MySQL URL when `DATABASE_URL` is unset.
 - **Migrations**: Alembic — config [alembic.ini](alembic.ini), versions in [alembic/versions/](alembic/versions/)
 
 ## Prerequisites
@@ -58,7 +58,7 @@ echo $! > backend.pid
 
 The recipes above each background a single command (no `&&` chain before the `&`) so `$!` reliably captures the right PID. Killing that PID brings down the whole child tree.
 
-Without `DATABASE_URL`, the backend falls back to SQLite (`whereisit.db`) — fine for quick tinkering, but the canonical workflow is MySQL.
+If `DATABASE_URL` is unset, the backend defaults to `mysql+pymysql://whereisit:whereisitpw@127.0.0.1:3306/whereisit` — same URL the docker-compose `db` service exposes — so the `DATABASE_URL=...` prefixes above are only needed when pointing at a different host.
 
 Then open:
 - App: http://localhost:5173
@@ -159,6 +159,37 @@ curl -H "Authorization: Bearer $WHEREISIT_TOKEN" http://localhost:8000/items/
 
 The check lives in a single middleware function so swapping for JWT/OAuth later is a one-file change.
 
+## AI providers
+
+[`backend/app/ai/`](backend/app/ai/) exposes an `LLMProvider` abstraction with `generate(messages)` and `tool_use_loop(messages, tools, on_tool_call)`. Two concrete providers ship out of the box:
+
+- **`LocalProvider`** (default) — Ollama HTTP at `LLM_LOCAL_URL` (default `http://127.0.0.1:11434`), model `LLM_LOCAL_MODEL` (default `llama3.1:8b`). Zero marginal cost.
+- **`AnthropicProvider`** — `claude-haiku-4-5` by default, override via `ANTHROPIC_MODEL`; requires `ANTHROPIC_API_KEY`. Calls are billed against the API key's account, separate from any Claude Code subscription.
+
+Pick at runtime with `LLM_PROVIDER=local|anthropic` (default `local`):
+
+```python
+from backend.app.ai import get_provider, Message
+
+provider = get_provider()                             # honours LLM_PROVIDER env var
+result = provider.generate(
+    [Message(role="user", content="Where can I find a hammer?")],
+    system="You answer inventory questions.",
+)
+print(result.text, result.usage)
+```
+
+`AnthropicProvider` caches the system prompt by default (`cache_system=True` → top-level `cache_control: ephemeral`), which M9/M10 rely on for cheap repeat calls. `LocalProvider` ignores caching arguments.
+
+The cascade orchestration — DB lookup → local LLM → cloud (opt-in with explicit confirmation) — lives in the `/ai/*` endpoints (M9/M10). No LLM SDK call should appear outside [backend/app/ai/](backend/app/ai/).
+
+Install Ollama for the local path (one-time):
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull llama3.1:8b
+```
+
 ## Tests
 
 Backend tests live in [tests/](tests/) and run against the docker-compose MySQL in a dedicated `whereisit_test` database (created/dropped per session by the fixture in [tests/conftest.py](tests/conftest.py)).
@@ -188,12 +219,9 @@ scripts/db_mysql.sh -- -e "SHOW TABLES;"
 
 # Connect as root
 scripts/db_mysql.sh --root
-
-# SQLite fallback (when DATABASE_URL is unset)
-scripts/db_connect.sh
 ```
 
-[scripts/db_mysql.sh](scripts/db_mysql.sh) shells into the running `db` container via `docker compose exec`. [scripts/db_connect.sh](scripts/db_connect.sh) only supports the `sqlite://` scheme.
+[scripts/db_mysql.sh](scripts/db_mysql.sh) shells into the running `db` container via `docker compose exec`.
 
 Add a migration:
 
@@ -208,14 +236,14 @@ alembic upgrade head
 
 - Routers: [backend/app/routers/](backend/app/routers/) — `items`, `containers`, `placements`, `tags`, `views`
 - Models: [backend/app/models/](backend/app/models/) (plus [backend/app/models.py](backend/app/models.py))
-- DB session: [backend/app/database.py](backend/app/database.py) — reads `DATABASE_URL`, defaults to `sqlite:///./whereisit.db`
+- DB session: [backend/app/database.py](backend/app/database.py) — reads `DATABASE_URL`, defaults to the docker-compose MySQL URL
+- AI providers: [backend/app/ai/](backend/app/ai/) — `LLMProvider` interface + `LocalProvider` / `AnthropicProvider`
 - Frontend pages: [frontend/src/pages/](frontend/src/pages/)
 - Frontend components: [frontend/src/components/](frontend/src/components/)
 
 ## Gotchas
 
 - **Two venvs exist** (`.venv/` and `venv/`). Only `.venv/` is active. Ignore `venv/`.
-- **`DATABASE_URL` must be set** for the backend to use MySQL. Without it, the app silently falls back to SQLite and any data you saved via Docker won't show up.
 - **Vite port fallback**: if `:5173` is in use, Vite picks `:5174` (visible in [frontend.log](frontend.log)). Update the URL you open accordingly.
 - **Frontend API base URL**: defaults to `http://127.0.0.1:8000`. Override with `VITE_API_URL` if the backend isn't on localhost:8000.
 - **CORS**: the backend enables CORS for all origins in dev — see [backend/app/main.py](backend/app/main.py).

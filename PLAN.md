@@ -20,7 +20,7 @@ Backend, scripts, and an MCP server come first so the assistant can manage the i
 1. **Unify items + containers into a single `nodes` table** with `kind_id` (FK to a reference table) + `can_contain` flag. Each node still has a free-text `name` (e.g. kind=drawer, name="blue drawer under the sink").
 2. **Reference tables everywhere it pays off** — `kinds`, `tags`, `property_keys`. Properties are a key-value table, not a JSON blob.
 3. **Quantity defaults to 1.** For multi-location tracking (5 hammers across two rooms), create one row per physical instance — 3 hammer rows parented to the garage, 2 to the basement. For container-as-item cases (a box of 100 nails), quantity stores the contents count. The schema doesn't enforce a semantic; the user decides per row. Aggregation answers "do I have a hammer?" by grouping result rows.
-4. **Provider-agnostic LLM abstraction.** `LLMProvider` interface; first implementation is Claude, but no hardcoded SDK calls leak into business logic.
+4. **Provider-agnostic LLM abstraction with local-first cascade.** `LLMProvider` interface supports multiple providers (local Ollama by default, Anthropic cloud opt-in). AI features tier through DB → local LLM → cloud, with cloud calls requiring explicit per-call confirmation. Keeps the marginal cost of `/ai/*` at zero unless the user opts in. No hardcoded SDK calls leak into business logic.
 5. **MCP server as the primary AI surface.** Exposes inventory tools so Claude Code can manage everything from the terminal. A REST `/ai/ask` endpoint comes later for the web UI.
 6. **Drop the `views` table.** Doesn't fit the cleaner hierarchy.
 7. **Wipe existing data.** Current items/containers are throwaway brainstorm — the new schema lands as a fresh CREATE.
@@ -107,14 +107,14 @@ Each milestone lands a working slice of the end-state design. The git workflow (
 - [x] **M7 — MCP server.** Python MCP server exposing inventory tools (same operations as the CLI). Talks to the backend with the same token. Documented Claude Code config snippet.
   - *Considerations:* no LLM here — the MCP server is a thin adapter; write tool docstrings carefully so Claude can call them without further prompting.
 
-- [ ] **M8 — `LLMProvider` abstraction.** Interface in `backend/app/ai/provider.py` with `generate(messages)` and `tool_use_loop(messages, tools)`. One concrete `AnthropicProvider` selected via `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY`.
-  - *Considerations:* no LLM calls outside `backend/app/ai/`; tests mock the provider.
+- [ ] **M8 — `LLMProvider` abstraction.** Interface in `backend/app/ai/provider.py` with `generate(messages)` and `tool_use_loop(messages, tools, on_tool_call)`. Two concrete providers: `LocalProvider` (Ollama HTTP, default) and `AnthropicProvider`. Selected via `LLM_PROVIDER=local|anthropic` (default `local`); local URL via `LLM_LOCAL_URL` (default `http://127.0.0.1:11434`), local model via `LLM_LOCAL_MODEL` (default `llama3.1:8b`); Anthropic via `ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL` (default `claude-haiku-4-5`).
+  - *Considerations:* no LLM calls outside `backend/app/ai/`; tests mock both providers (no live API calls in CI). M9/M10 build the cascade orchestration on top — M8 is plumbing only.
 
-- [ ] **M9 — Placement suggestion.** `POST /ai/suggest-placement` + MCP tool `suggest_placement`. Input: `{description, dimensions?, tags?}`. Algorithm: LLM extracts category + candidate tags → scorer ranks containers on tag overlap + dimension fit + "containers already holding similar things" → LLM picks top-N with one-line reasons.
-  - *Considerations:* cold-start (empty DB) falls back to LLM-only suggestions; cap at 5; log every call to tune prompts.
+- [ ] **M9 — Placement suggestion.** `POST /ai/suggest-placement` + MCP tool `suggest_placement`. Input: `{description, dimensions?, tags?, confirm_remote?: bool}`. Cascade: (1) tag/kind overlap heuristic over `/search` results, (2) local LLM ranks and picks with one-line reasons, (3) escalate to Anthropic cloud only when `confirm_remote=true` is set on the request. Without confirmation, a tier-3 fallback returns a `needs_remote_confirmation` response instead.
+  - *Considerations:* cold-start (empty DB) skips tier 1; cap suggestions at 5; log every call to tune prompts; cloud calls require explicit user opt-in per Decision #4.
 
-- [ ] **M10 — Natural-language Q&A.** `POST /ai/ask` + MCP tool `ask`. Tool-use loop over the inventory tools. Aggregation answers ("3 in the garage, 2 in the basement") come from grouping search results by name (case-insensitive).
-  - *Considerations:* prompt-cache the system prompt + tool defs; bound loop iterations (~8); structured logging of every tool call for debugging.
+- [ ] **M10 — Natural-language Q&A.** `POST /ai/ask` + MCP tool `ask`. Cascade: (1) literal-match search where the query maps cleanly to filters, (2) local LLM tool-use loop over the inventory tools, (3) escalate to Anthropic cloud only when `confirm_remote=true`. Aggregation answers ("3 in the garage, 2 in the basement") come from grouping search results by name (case-insensitive).
+  - *Considerations:* prompt-cache the system prompt + tool defs (Anthropic provider only — local model gets no benefit); bound loop iterations (~8); structured logging of every tool call for debugging; same `needs_remote_confirmation` response shape as M9.
 
 - [ ] **M11 — Embeddings.** `embeddings` table + a backfill job that finds nodes where `updated_at > embedded_at`. Search gains `mode=semantic|hybrid`.
   - *Considerations:* start with TEXT-serialized vectors + in-Python cosine (fine for thousands of nodes); upgrade to pgvector / sqlite-vss / Qdrant when scale demands; embedding model selected via `LLMProvider`.
