@@ -8,7 +8,7 @@ Guide for coding agents (and humans) working in this repo. Copy-paste recipes fo
 
 - **Backend**: FastAPI on `:8000` — entrypoint [backend/app/main.py](backend/app/main.py)
 - **Frontend**: React + Vite on `:5173` — entrypoint [frontend/src/App.jsx](frontend/src/App.jsx)
-- **DB**: MySQL 8 via [docker-compose.yml](docker-compose.yml). SQLite fallback (`whereisit.db`) when `DATABASE_URL` is unset.
+- **DB**: MySQL 8 via [docker-compose.yml](docker-compose.yml). Backend defaults to the docker-compose MySQL URL when `DATABASE_URL` is unset.
 - **Migrations**: Alembic — config [alembic.ini](alembic.ini), versions in [alembic/versions/](alembic/versions/)
 
 ## Prerequisites
@@ -58,7 +58,7 @@ echo $! > backend.pid
 
 The recipes above each background a single command (no `&&` chain before the `&`) so `$!` reliably captures the right PID. Killing that PID brings down the whole child tree.
 
-Without `DATABASE_URL`, the backend falls back to SQLite (`whereisit.db`) — fine for quick tinkering, but the canonical workflow is MySQL.
+If `DATABASE_URL` is unset, the backend defaults to `mysql+pymysql://whereisit:whereisitpw@127.0.0.1:3306/whereisit` — same URL the docker-compose `db` service exposes — so the `DATABASE_URL=...` prefixes above are only needed when pointing at a different host.
 
 Then open:
 - App: http://localhost:5173
@@ -188,12 +188,9 @@ scripts/db_mysql.sh -- -e "SHOW TABLES;"
 
 # Connect as root
 scripts/db_mysql.sh --root
-
-# SQLite fallback (when DATABASE_URL is unset)
-scripts/db_connect.sh
 ```
 
-[scripts/db_mysql.sh](scripts/db_mysql.sh) shells into the running `db` container via `docker compose exec`. [scripts/db_connect.sh](scripts/db_connect.sh) only supports the `sqlite://` scheme.
+[scripts/db_mysql.sh](scripts/db_mysql.sh) shells into the running `db` container via `docker compose exec`.
 
 Add a migration:
 
@@ -208,14 +205,13 @@ alembic upgrade head
 
 - Routers: [backend/app/routers/](backend/app/routers/) — `items`, `containers`, `placements`, `tags`, `views`
 - Models: [backend/app/models/](backend/app/models/) (plus [backend/app/models.py](backend/app/models.py))
-- DB session: [backend/app/database.py](backend/app/database.py) — reads `DATABASE_URL`, defaults to `sqlite:///./whereisit.db`
+- DB session: [backend/app/database.py](backend/app/database.py) — reads `DATABASE_URL`, defaults to the docker-compose MySQL URL
 - Frontend pages: [frontend/src/pages/](frontend/src/pages/)
 - Frontend components: [frontend/src/components/](frontend/src/components/)
 
 ## Gotchas
 
 - **Two venvs exist** (`.venv/` and `venv/`). Only `.venv/` is active. Ignore `venv/`.
-- **`DATABASE_URL` must be set** for the backend to use MySQL. Without it, the app silently falls back to SQLite and any data you saved via Docker won't show up.
 - **Vite port fallback**: if `:5173` is in use, Vite picks `:5174` (visible in [frontend.log](frontend.log)). Update the URL you open accordingly.
 - **Frontend API base URL**: defaults to `http://127.0.0.1:8000`. Override with `VITE_API_URL` if the backend isn't on localhost:8000.
 - **CORS**: the backend enables CORS for all origins in dev — see [backend/app/main.py](backend/app/main.py).
