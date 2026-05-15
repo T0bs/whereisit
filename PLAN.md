@@ -101,7 +101,7 @@ Each milestone lands a working slice of the end-state design. The git workflow (
 - [x] **M5 — Search.** `GET /search?q=&parent=&kind=&tag=&mode=keyword`. MySQL FULLTEXT over `name + description`. Each result carries `score`, `match_reason`, `path` (ancestors).
   - *Considerations:* response shape supports future `mode=semantic|hybrid` without changes. Compute ancestor path on the fly first; materialize a `path` column only if it gets slow.
 
-- [ ] **M6 — `scripts/wii` CLI.** Python single-file CLI wrapping the API. Commands: `add`, `find`, `tree`, `move`, `tag`, `prop`, `rm`. Reads `WHEREISIT_TOKEN`, `WHEREISIT_API_URL` (default `http://127.0.0.1:8000`).
+- [x] **M6 — `scripts/wii` CLI.** Python single-file CLI wrapping the API. Commands: `add`, `find`, `tree`, `move`, `tag`, `prop`, `rm`. Reads `WHEREISIT_TOKEN`, `WHEREISIT_API_URL` (default `http://127.0.0.1:8000`).
   - *Considerations:* every command supports `--json` for agents; default is pretty for humans; mirror MCP tool names so muscle-memory transfers.
 
 - [ ] **M7 — MCP server.** Python MCP server exposing inventory tools (same operations as the CLI). Talks to the backend with the same token. Documented Claude Code config snippet.

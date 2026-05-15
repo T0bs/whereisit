@@ -1,0 +1,372 @@
+#!/usr/bin/env python3
+"""wii — whereisit CLI.
+
+Wraps the REST API for terminal and agent use. Reads WHEREISIT_API_URL
+(default http://127.0.0.1:8000) and WHEREISIT_TOKEN from env. Every
+command supports --json for machine-readable output.
+
+Commands:
+  add NAME --kind K [--parent P] [--container] [--description D] [--tag T ...]
+  find [QUERY...] [--kind K] [--tag T] [--parent P] [--limit N]
+  tree [NODE_ID]  [--depth N]
+  move ID --to PARENT_OR_root
+  tag ID add|rm TAG_NAME
+  prop ID set KEY VALUE [--type string|int|float|bool]
+  prop ID rm KEY
+  prop ID list
+  rm ID [--cascade]
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import Any, Optional
+
+
+class ApiClient:
+    """Minimal HTTP client over urllib. Tests substitute their own."""
+
+    def __init__(self, base_url: str, token: Optional[str] = None):
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        params: Optional[dict] = None,
+        body: Optional[Any] = None,
+    ) -> tuple[int, Any]:
+        url = self.base_url + path
+        if params:
+            cleaned = {k: v for k, v in params.items() if v is not None}
+            if cleaned:
+                url += "?" + urllib.parse.urlencode(cleaned)
+        headers = {"Accept": "application/json"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        data = None
+        if body is not None:
+            data = json.dumps(body).encode()
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req) as resp:
+                raw = resp.read().decode() if resp.length != 0 else ""
+                payload = json.loads(raw) if raw else None
+                return resp.status, payload
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode()
+            try:
+                payload = json.loads(raw) if raw else None
+            except json.JSONDecodeError:
+                payload = raw
+            return e.code, payload
+
+
+def make_default_client() -> ApiClient:
+    return ApiClient(
+        os.getenv("WHEREISIT_API_URL", "http://127.0.0.1:8000"),
+        os.getenv("WHEREISIT_TOKEN"),
+    )
+
+
+def _die(msg: str, code: int = 1) -> None:
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def _check(status: int, body: Any, *, ok=(200, 201, 204)) -> Any:
+    if status not in ok:
+        _die(f"API error {status}: {body}")
+    return body
+
+
+def _print_json(obj: Any) -> None:
+    print(json.dumps(obj, indent=2, default=str))
+
+
+# ---------- commands ----------
+
+
+def cmd_add(args, client: ApiClient) -> None:
+    body: dict = {"name": args.name, "kind": args.kind, "can_contain": args.container}
+    if args.parent is not None:
+        body["parent_id"] = None if args.parent == "root" else int(args.parent)
+    if args.description is not None:
+        body["description"] = args.description
+    if args.quantity is not None:
+        body["quantity"] = args.quantity
+
+    status, node = client.request("POST", "/nodes", body=body)
+    _check(status, node)
+
+    for tag_name in args.tag or []:
+        tag_status, tag_body = client.request(
+            "POST", f"/nodes/{node['id']}/tags", body={"name": tag_name}
+        )
+        _check(tag_status, tag_body)
+
+    if args.tag:
+        status, node = client.request("GET", f"/nodes/{node['id']}")
+        _check(status, node)
+
+    if args.json:
+        _print_json(node)
+    else:
+        line = f"#{node['id']}  {node['name']}  ({node['kind']['slug']})"
+        if node["parent_id"] is not None:
+            line += f"  in #{node['parent_id']}"
+        print(line)
+        if node["tags"]:
+            print(f"  tags: {', '.join(t['name'] for t in node['tags'])}")
+
+
+def cmd_find(args, client: ApiClient) -> None:
+    params: dict = {"limit": args.limit}
+    if args.query:
+        params["q"] = " ".join(args.query)
+    if args.kind:
+        params["kind"] = args.kind
+    if args.tag:
+        params["tag"] = args.tag
+    if args.parent:
+        params["parent"] = args.parent
+
+    status, results = client.request("GET", "/search", params=params)
+    _check(status, results)
+
+    if args.json:
+        _print_json(results)
+        return
+
+    if not results:
+        print("(no matches)")
+        return
+    for r in results:
+        path = " > ".join(p["name"] for p in r["path"])
+        score = f"  [{r['score']:.3f}]" if r["score"] is not None else ""
+        print(f"#{r['id']}{score}  {path}")
+
+
+def _print_tree(node: dict, indent: int = 0) -> None:
+    qty = f" x{node['quantity']}" if node["quantity"] != 1 else ""
+    print(
+        f"{'  ' * indent}#{node['id']} {node['name']} "
+        f"({node['kind']['slug']}){qty}"
+    )
+    for child in node.get("children", []):
+        _print_tree(child, indent + 1)
+
+
+def cmd_tree(args, client: ApiClient) -> None:
+    if args.node is None or args.node == "root":
+        status, roots = client.request("GET", "/nodes", params={"parent": "root"})
+        _check(status, roots)
+        trees = []
+        for root in roots:
+            s, t = client.request(
+                "GET", f"/nodes/{root['id']}/tree", params={"depth": args.depth}
+            )
+            _check(s, t)
+            trees.append(t)
+        if args.json:
+            _print_json(trees)
+        else:
+            if not trees:
+                print("(no nodes)")
+                return
+            for t in trees:
+                _print_tree(t)
+    else:
+        status, t = client.request(
+            "GET", f"/nodes/{int(args.node)}/tree", params={"depth": args.depth}
+        )
+        _check(status, t)
+        if args.json:
+            _print_json(t)
+        else:
+            _print_tree(t)
+
+
+def cmd_move(args, client: ApiClient) -> None:
+    parent_id = None if args.to == "root" else int(args.to)
+    status, node = client.request(
+        "PATCH", f"/nodes/{int(args.id)}", body={"parent_id": parent_id}
+    )
+    _check(status, node)
+    if args.json:
+        _print_json(node)
+    else:
+        target = "root" if args.to == "root" else f"#{args.to}"
+        print(f"#{args.id}  →  {target}")
+
+
+def cmd_tag(args, client: ApiClient) -> None:
+    node_id = int(args.id)
+    if args.action == "add":
+        status, tag = client.request(
+            "POST", f"/nodes/{node_id}/tags", body={"name": args.tag}
+        )
+        _check(status, tag)
+        if args.json:
+            _print_json(tag)
+        else:
+            print(f"#{node_id}  +tag:{args.tag}  (tag #{tag['id']})")
+    else:  # rm
+        status, tags = client.request("GET", "/tags", params={"q": args.tag})
+        _check(status, tags)
+        match = next((t for t in tags if t["name"] == args.tag), None)
+        if match is None:
+            _die(f"no tag named {args.tag!r}", code=2)
+        status, body = client.request(
+            "DELETE", f"/nodes/{node_id}/tags/{match['id']}"
+        )
+        _check(status, body, ok=(204,))
+        if not args.json:
+            print(f"#{node_id}  -tag:{args.tag}")
+
+
+def cmd_prop(args, client: ApiClient) -> None:
+    node_id = int(args.id)
+    if args.action == "list":
+        status, props = client.request("GET", f"/nodes/{node_id}/properties")
+        _check(status, props)
+        if args.json:
+            _print_json(props)
+        elif not props:
+            print("(no properties)")
+        else:
+            for p in props:
+                print(f"  {p['key']} = {p['value']} ({p['value_type']})")
+        return
+
+    if args.action == "set":
+        body: dict = {"value": args.value}
+        if args.type:
+            body["value_type"] = args.type
+        status, prop = client.request(
+            "PUT", f"/nodes/{node_id}/properties/{args.key}", body=body
+        )
+        _check(status, prop)
+        if args.json:
+            _print_json(prop)
+        else:
+            print(
+                f"#{node_id}  {prop['key']} = {prop['value']} ({prop['value_type']})"
+            )
+        return
+
+    # rm
+    status, body = client.request(
+        "DELETE", f"/nodes/{node_id}/properties/{args.key}"
+    )
+    _check(status, body, ok=(204,))
+    if not args.json:
+        print(f"#{node_id}  -prop:{args.key}")
+
+
+def cmd_rm(args, client: ApiClient) -> None:
+    node_id = int(args.id)
+    params = {"cascade": "true"} if args.cascade else None
+    status, body = client.request("DELETE", f"/nodes/{node_id}", params=params)
+    if status == 204:
+        if not args.json:
+            print(f"deleted #{node_id}")
+        return
+    if status == 409:
+        _die(
+            f"#{node_id} has children — pass --cascade to delete the subtree",
+            code=2,
+        )
+    _die(f"API error {status}: {body}")
+
+
+# ---------- arg parsing ----------
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="wii", description="whereisit CLI")
+    p.add_argument(
+        "--json",
+        action="store_true",
+        help="emit JSON instead of pretty text",
+    )
+    sub = p.add_subparsers(dest="command", required=True)
+
+    s_add = sub.add_parser("add", help="add a node")
+    s_add.add_argument("name")
+    s_add.add_argument("--kind", required=True, help="kind slug (e.g. drawer, tool)")
+    s_add.add_argument("--parent", help="parent node id or 'root'")
+    s_add.add_argument(
+        "--container",
+        action="store_true",
+        help="can_contain=true (this node accepts children)",
+    )
+    s_add.add_argument("--description")
+    s_add.add_argument("--quantity", type=int)
+    s_add.add_argument("--tag", action="append", help="add tag (repeatable)")
+    s_add.set_defaults(func=cmd_add)
+
+    s_find = sub.add_parser("find", help="search nodes (FULLTEXT + filters)")
+    s_find.add_argument("query", nargs="*", help="free-text query")
+    s_find.add_argument("--kind")
+    s_find.add_argument("--tag")
+    s_find.add_argument("--parent", help="'root' or a node id")
+    s_find.add_argument("--limit", type=int, default=50)
+    s_find.set_defaults(func=cmd_find)
+
+    s_tree = sub.add_parser("tree", help="show tree from a node (default: all roots)")
+    s_tree.add_argument("node", nargs="?", default=None)
+    s_tree.add_argument("--depth", type=int, default=10)
+    s_tree.set_defaults(func=cmd_tree)
+
+    s_move = sub.add_parser("move", help="reparent a node")
+    s_move.add_argument("id")
+    s_move.add_argument("--to", required=True, help="new parent id or 'root'")
+    s_move.set_defaults(func=cmd_move)
+
+    s_tag = sub.add_parser("tag", help="add/remove a tag on a node")
+    s_tag.add_argument("id")
+    s_tag.add_argument("action", choices=["add", "rm"])
+    s_tag.add_argument("tag")
+    s_tag.set_defaults(func=cmd_tag)
+
+    s_prop = sub.add_parser("prop", help="manage node properties")
+    s_prop.add_argument("id")
+    s_prop_sub = s_prop.add_subparsers(dest="action", required=True)
+    s_set = s_prop_sub.add_parser("set")
+    s_set.add_argument("key")
+    s_set.add_argument("value")
+    s_set.add_argument("--type", choices=["string", "int", "float", "bool"])
+    s_rm_prop = s_prop_sub.add_parser("rm")
+    s_rm_prop.add_argument("key")
+    s_prop_sub.add_parser("list")
+    s_prop.set_defaults(func=cmd_prop)
+
+    s_rm = sub.add_parser("rm", help="delete a node")
+    s_rm.add_argument("id")
+    s_rm.add_argument(
+        "--cascade",
+        action="store_true",
+        help="delete the whole subtree (otherwise refuses if it has children)",
+    )
+    s_rm.set_defaults(func=cmd_rm)
+
+    return p
+
+
+def main(argv=None, client: Optional[ApiClient] = None) -> None:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    args.func(args, client or make_default_client())
+
+
+if __name__ == "__main__":
+    main()

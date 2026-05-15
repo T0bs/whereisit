@@ -89,6 +89,40 @@ pkill -f "vite"
 - **Frontend**: Vite HMR auto-reloads in the browser on save.
 - **Hard restart**: run Stop, then Start.
 
+## CLI
+
+[`scripts/wii`](scripts/wii) is the everyday CLI. Stdlib-only (no venv needed), wraps the REST API, reads `WHEREISIT_API_URL` (default `http://127.0.0.1:8000`) and `WHEREISIT_TOKEN`.
+
+```bash
+# Inventory
+scripts/wii add "Garage" --kind room --container
+scripts/wii add "Cordless drill" --kind tool --parent 1 --tag metal --tag battery
+scripts/wii find hammer
+scripts/wii find --kind tool --tag metal
+scripts/wii tree                 # all roots
+scripts/wii tree 1               # subtree of node #1
+scripts/wii move 5 --to 2        # reparent #5 under #2
+scripts/wii move 5 --to root     # promote to top-level
+
+# Tags
+scripts/wii tag 5 add metal
+scripts/wii tag 5 rm metal
+
+# Properties
+scripts/wii prop 5 set weight_g 600 --type int
+scripts/wii prop 5 list
+scripts/wii prop 5 rm weight_g
+
+# Delete
+scripts/wii rm 5
+scripts/wii rm 5 --cascade       # delete the whole subtree
+
+# Machine-readable
+scripts/wii --json find hammer
+```
+
+Every command supports `--json` for agents; the default is pretty text.
+
 ## Auth
 
 Single-token Bearer auth gated by the `WHEREISIT_TOKEN` env var (implemented in [backend/app/auth.py](backend/app/auth.py)).
