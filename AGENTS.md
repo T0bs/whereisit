@@ -211,6 +211,24 @@ Cascade:
 
 The same operation is exposed as the MCP tool `suggest_placement` for terminal use.
 
+### `POST /ai/ask`
+
+Natural-language Q&A and action (M10). Same two-gate cloud rule.
+
+```bash
+curl -X POST http://127.0.0.1:8000/ai/ask \
+  -H 'Content-Type: application/json' \
+  -d '{"question": "where is my hammer?"}'
+```
+
+Cascade:
+1. **`tier_used: search`** — strip stopwords, run FULLTEXT. If matches found, return them formatted ("Found N: path1, path2…") without calling the LLM.
+2. **`tier_used: local`** — local LLM tool-use loop. The model has all 14 inventory tools (`search`, `get_node`, `get_children`, `get_path`, `list_root_nodes`, `list_kinds`, `list_tags`, `add_node`, `update_node`, `move_node`, `delete_node`, `add_tag`, `remove_tag`, `set_property`). The system prompt instructs the model not to call write tools unless the user asks.
+3. **`tier_used: anthropic`** — same loop against `AnthropicProvider`; needs both gates on.
+4. **`tier_used: exhausted`** — local and cloud both failed (or cloud was off).
+
+Every tool call appears in the response's `tool_calls: [{tool, input, output, is_error}]` array so you can audit what the assistant did. The MCP tool `ask` wraps the endpoint.
+
 Install Ollama for the local path (one-time):
 
 ```bash
