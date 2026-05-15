@@ -181,7 +181,35 @@ print(result.text, result.usage)
 
 `AnthropicProvider` caches the system prompt by default (`cache_system=True` → top-level `cache_control: ephemeral`), which M9/M10 rely on for cheap repeat calls. `LocalProvider` ignores caching arguments.
 
-The cascade orchestration — DB lookup → local LLM → cloud (opt-in with explicit confirmation) — lives in the `/ai/*` endpoints (M9/M10). No LLM SDK call should appear outside [backend/app/ai/](backend/app/ai/).
+The cascade orchestration — DB lookup → local LLM → cloud (opt-in with explicit confirmation) — lives in the `/ai/*` endpoints. No LLM SDK call should appear outside [backend/app/ai/](backend/app/ai/).
+
+### Cloud kill switch
+
+Tier 3 (Anthropic) is gated by **two** flags, both required:
+
+1. **Server-side**: `WHEREISIT_CLOUD_ENABLED=true` on the backend process. Default is *off*.
+2. **Per-request**: `confirm_remote: true` in the request body.
+
+With the kill switch *off*, sending `confirm_remote: true` returns `400 cloud_disabled` — the server can't honour it. With the switch *on* and `confirm_remote` omitted/false, traffic stays on the local provider. Flip `WHEREISIT_CLOUD_ENABLED=true` only once the local stack (Ollama + local model) is validated end-to-end.
+
+### `POST /ai/suggest-placement`
+
+The first cascade endpoint (M9). Asks "where should I put this thing?".
+
+```bash
+curl -X POST http://127.0.0.1:8000/ai/suggest-placement \
+  -H 'Content-Type: application/json' \
+  -d '{"description": "claw hammer with rubber grip", "tags": ["metal", "tool"], "kind": "tool"}'
+```
+
+Cascade:
+1. **`tier_used: heuristic`** — tag overlap + kind-affinity score over `can_contain` nodes. Returns top N directly if confidence ≥ 0.6.
+2. **`tier_used: local`** — heuristic was weak; local LLM (Ollama) reranks the top candidates and returns picks with one-line reasons.
+3. **`tier_used: anthropic`** — only if both gates above are on. Same prompt as tier 2 but against `AnthropicProvider`.
+4. **`tier_used: heuristic_fallback`** — LLM failed or returned junk; return the heuristic ranking anyway.
+5. **`tier_used: empty_db`** — no containers exist; nothing to suggest.
+
+The same operation is exposed as the MCP tool `suggest_placement` for terminal use.
 
 Install Ollama for the local path (one-time):
 

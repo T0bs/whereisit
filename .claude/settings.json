@@ -7,7 +7,9 @@
       "Bash(echo \"Exit code: $? \\(124 = timed out which means it was running cleanly waiting for stdin\\)\")",
       "Bash(git commit -m ' *)",
       "mcp__whereisit__list_root_nodes",
-      "mcp__whereisit__list_tags"
+      "mcp__whereisit__list_tags",
+      "Bash(.venv/bin/pytest tests/test_ai_placement.py -v)",
+      "Bash(.venv/bin/pytest -q)"
     ]
   }
 }

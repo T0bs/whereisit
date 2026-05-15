@@ -111,3 +111,36 @@ def test_list_kinds_includes_seeds(mcp):
     kinds = mcp.list_kinds()
     slugs = {k["slug"] for k in kinds}
     assert {"room", "tool", "drawer", "item"}.issubset(slugs)
+
+
+def test_suggest_placement_via_mcp(mcp, monkeypatch):
+    """The MCP tool forwards to /ai/suggest-placement and surfaces the cascade tier."""
+    garage = mcp.add_node(name="Garage", kind="room", can_contain=True)
+    cupboard = mcp.add_node(
+        name="Tool cupboard",
+        kind="cupboard",
+        parent_id=garage["id"],
+        can_contain=True,
+    )
+    mcp.add_tag(cupboard["id"], "metal")
+    mcp.add_tag(cupboard["id"], "tool")
+
+    # Cloud off — confirm_remote=True should error
+    monkeypatch.delenv("WHEREISIT_CLOUD_ENABLED", raising=False)
+    with pytest.raises(RuntimeError, match="cloud_disabled"):
+        mcp.suggest_placement(
+            description="claw hammer",
+            tags=["metal", "tool"],
+            kind="tool",
+            confirm_remote=True,
+        )
+
+    # Heuristic tier returns the cupboard
+    result = mcp.suggest_placement(
+        description="claw hammer",
+        tags=["metal", "tool"],
+        kind="tool",
+    )
+    assert result["tier_used"] == "heuristic"
+    assert result["cloud_enabled"] is False
+    assert result["suggestions"][0]["node_id"] == cupboard["id"]
