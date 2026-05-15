@@ -6,6 +6,7 @@ from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from .auth import auth_middleware
 from .routers import kinds as kinds_router
 from .routers import nodes as nodes_router
+from .routers import search as search_router
 from .routers import tags as tags_router
 
 app = FastAPI(title="whereisit")
@@ -14,6 +15,7 @@ app.middleware("http")(auth_middleware)
 app.include_router(nodes_router.router)
 app.include_router(tags_router.router)
 app.include_router(kinds_router.router)
+app.include_router(search_router.router)
 
 app.add_middleware(
     CORSMiddleware,

@@ -128,6 +128,29 @@ class PropertyValueSet(BaseModel):
     value_type: Optional[str] = None
 
 
+class SearchResult(BaseModel):
+    """One row in the /search response.
+
+    `score` and `match_reason` are mode-dependent — keyword mode fills them
+    from the FULLTEXT relevance score; semantic/hybrid modes (M11) will use
+    the same fields with different meanings.
+
+    `path` is the full ancestor chain root→self (inclusive), so a client can
+    display 'Garage > Workbench > Drawer A > Claw hammer' without follow-up
+    requests.
+    """
+
+    id: int
+    name: str
+    kind: KindRef
+    parent_id: Optional[int] = None
+    can_contain: bool
+    quantity: int
+    score: Optional[float] = None
+    match_reason: Optional[str] = None
+    path: List["NodeSummary"] = Field(default_factory=list)
+
+
 class TreeNode(BaseModel):
     """Recursive tree node response for GET /nodes/{id}/tree."""
 

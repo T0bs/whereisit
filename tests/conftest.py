@@ -65,14 +65,55 @@ def client(_test_database):
         yield c
 
 
-@pytest.fixture(autouse=True)
-def _isolated_db(_test_database):
-    """Wrap each test in a transaction that's rolled back at the end.
+_TRUNCATE_TABLES = (
+    "node_properties",
+    "node_tags",
+    "nodes",
+    "tags",
+    "property_keys",
+)
 
-    All sessions handed to the FastAPI app via `get_db` are bound to the same
-    test-scoped connection. Handler commits land on a SAVEPOINT that's restarted
-    after each commit, so the outer transaction stays open for the rollback.
+
+def _truncate_state() -> None:
+    from sqlalchemy import text
+
+    from backend.app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        db.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
+        for tbl in _TRUNCATE_TABLES:
+            db.execute(text(f"TRUNCATE TABLE `{tbl}`"))
+        db.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
+        db.commit()
+    finally:
+        db.close()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_db(request, _test_database):
+    """Default: wrap each test in a transaction that's rolled back at the end.
+
+    Handler sessions are bound to the test connection via a SAVEPOINT, so
+    handler commits land on the savepoint (restarted by the after-transaction-end
+    listener) and the outer transaction stays open for the final rollback.
+
+    Tests marked `committed_writes` skip the wrap — handlers go through the real
+    `get_db` and writes commit. Cleanup is a TRUNCATE after each such test. Use
+    this for code paths that depend on committed state (e.g. MySQL FULLTEXT,
+    which only sees committed rows).
     """
+    needs_commit = request.node.get_closest_marker("committed_writes") is not None
+
+    if needs_commit:
+        # Migration leaves per-test tables empty, and transaction-rollback tests
+        # don't leak committed writes, so only the AFTER truncate is needed.
+        try:
+            yield None
+        finally:
+            _truncate_state()
+        return
+
     from backend.app import database as db_module
     from backend.app.main import app
 
