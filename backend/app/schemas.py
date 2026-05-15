@@ -104,6 +104,30 @@ class NodeUpdate(BaseModel):
     gps_lng: Optional[float] = None
 
 
+class TagCreate(BaseModel):
+    """POST /tags body and POST /nodes/{id}/tags body."""
+
+    name: str = Field(min_length=1, max_length=100)
+
+
+class KindCreate(BaseModel):
+    """POST /kinds body. Label defaults to titlecased slug when creating new."""
+
+    slug: str = Field(min_length=1, max_length=50)
+    label: Optional[str] = Field(default=None, max_length=100)
+
+
+class PropertyValueSet(BaseModel):
+    """PUT /nodes/{id}/properties/{key} body.
+
+    `value_type` is only consulted when the property key is first created —
+    once set, a key's type is sticky across all nodes that use it.
+    """
+
+    value: object
+    value_type: Optional[str] = None
+
+
 class TreeNode(BaseModel):
     """Recursive tree node response for GET /nodes/{id}/tree."""
 
