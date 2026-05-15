@@ -89,6 +89,25 @@ pkill -f "vite"
 - **Frontend**: Vite HMR auto-reloads in the browser on save.
 - **Hard restart**: run Stop, then Start.
 
+## MCP server
+
+[`scripts/wii_mcp`](scripts/wii_mcp) is an MCP stdio server that exposes the inventory operations as MCP tools. Claude Code picks it up automatically via [.mcp.json](.mcp.json) at the repo root — start a `claude` session inside the project and the tools appear in `/mcp`.
+
+Tools (one per CLI subcommand plus convenience wrappers):
+- **Navigation:** `find_nodes`, `get_node`, `get_children`, `get_path`, `get_tree`, `list_root_nodes`
+- **Create / update:** `add_node`, `rename_node`, `update_node`, `move_node`, `delete_node`
+- **Tags:** `add_tag`, `remove_tag`, `list_tags`
+- **Kinds:** `list_kinds`, `create_kind`
+- **Properties:** `set_property`, `list_properties`, `delete_property`
+
+Each tool docstring documents when to use it and what each argument means — that text is the prompt the LLM sees.
+
+Run it manually for debugging:
+
+```bash
+.venv/bin/python scripts/wii_mcp   # blocks on stdin, speaks JSON-RPC
+```
+
 ## CLI
 
 [`scripts/wii`](scripts/wii) is the everyday CLI. Stdlib-only (no venv needed), wraps the REST API, reads `WHEREISIT_API_URL` (default `http://127.0.0.1:8000`) and `WHEREISIT_TOKEN`.

@@ -104,7 +104,7 @@ Each milestone lands a working slice of the end-state design. The git workflow (
 - [x] **M6 — `scripts/wii` CLI.** Python single-file CLI wrapping the API. Commands: `add`, `find`, `tree`, `move`, `tag`, `prop`, `rm`. Reads `WHEREISIT_TOKEN`, `WHEREISIT_API_URL` (default `http://127.0.0.1:8000`).
   - *Considerations:* every command supports `--json` for agents; default is pretty for humans; mirror MCP tool names so muscle-memory transfers.
 
-- [ ] **M7 — MCP server.** Python MCP server exposing inventory tools (same operations as the CLI). Talks to the backend with the same token. Documented Claude Code config snippet.
+- [x] **M7 — MCP server.** Python MCP server exposing inventory tools (same operations as the CLI). Talks to the backend with the same token. Documented Claude Code config snippet.
   - *Considerations:* no LLM here — the MCP server is a thin adapter; write tool docstrings carefully so Claude can call them without further prompting.
 
 - [ ] **M8 — `LLMProvider` abstraction.** Interface in `backend/app/ai/provider.py` with `generate(messages)` and `tool_use_loop(messages, tools)`. One concrete `AnthropicProvider` selected via `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY`.

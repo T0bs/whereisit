@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/python -c \"import fastapi, starlette, uvicorn, mcp; print\\('fastapi', fastapi.__version__\\); print\\('starlette', starlette.__version__\\); print\\('uvicorn', uvicorn.__version__\\)\")",
+      "Bash(.venv/bin/pytest tests/test_wii_mcp.py -v)",
+      "Bash(timeout 3 *)",
+      "Bash(echo \"Exit code: $? \\(124 = timed out which means it was running cleanly waiting for stdin\\)\")",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}

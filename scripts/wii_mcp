@@ -1,0 +1,364 @@
+#!/usr/bin/env python3
+"""whereisit MCP server.
+
+Exposes inventory operations as MCP tools so Claude Code can manage the home
+inventory natively from any session. Thin adapter over the REST API at
+WHEREISIT_API_URL (default http://127.0.0.1:8000), authed with WHEREISIT_TOKEN
+if set. The tools mirror scripts/wii so muscle-memory transfers.
+
+Start manually with:  .venv/bin/python scripts/wii_mcp
+But normally Claude Code picks it up via .mcp.json at the repo root.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from typing import Any, Optional
+
+import httpx
+from mcp.server.fastmcp import FastMCP
+
+
+def _make_client() -> httpx.Client:
+    base_url = os.getenv("WHEREISIT_API_URL", "http://127.0.0.1:8000")
+    headers = {"Accept": "application/json"}
+    token = os.getenv("WHEREISIT_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return httpx.Client(base_url=base_url, headers=headers, timeout=15.0)
+
+
+_client: Optional[httpx.Client] = None
+
+
+def _client_or_make() -> httpx.Client:
+    global _client
+    if _client is None:
+        _client = _make_client()
+    return _client
+
+
+def _set_client_for_tests(client: httpx.Client) -> None:
+    """Tests inject a TestClient-backed httpx.Client; not for production use."""
+    global _client
+    _client = client
+
+
+def _call(method: str, path: str, *, params: Optional[dict] = None, body: Any = None) -> Any:
+    kwargs: dict = {}
+    if params:
+        kwargs["params"] = {k: v for k, v in params.items() if v is not None}
+    if body is not None:
+        kwargs["json"] = body
+    response = _client_or_make().request(method, path, **kwargs)
+    if response.status_code >= 400:
+        try:
+            detail = response.json()
+        except json.JSONDecodeError:
+            detail = response.text
+        raise RuntimeError(f"API {response.status_code}: {detail}")
+    if response.status_code == 204 or not response.content:
+        return None
+    return response.json()
+
+
+mcp = FastMCP("whereisit")
+
+
+# ---------- tools ----------
+
+
+@mcp.tool()
+def add_node(
+    name: str,
+    kind: str,
+    parent_id: Optional[int] = None,
+    can_contain: bool = False,
+    description: Optional[str] = None,
+    quantity: int = 1,
+) -> dict:
+    """Create a new inventory node.
+
+    Use this when the user mentions a new physical thing, whether it's an
+    *item* (a hammer, a box of nails) or a *storage location* (a drawer, a
+    garage, a cupboard). Both go through this one endpoint — set
+    `can_contain=True` for storage and False for leaf items.
+
+    Args:
+        name: Free-text label shown to the user, e.g. "blue drawer under
+            the sink" or "Claw hammer with rubber grip".
+        kind: Slug from the seeded set — room, building, cupboard, shelf,
+            drawer, box, bag, item, tool, consumable — or any custom kind
+            created via the /kinds endpoint. Use `list_kinds` if unsure.
+        parent_id: Node id of the container this thing lives inside. None
+            for top-level entries (e.g. the garage itself, or a building).
+            The parent must have can_contain=True or the call fails.
+        can_contain: True if this node accepts children (drawer, box,
+            cupboard, room). False for leaf items (hammer, screwdriver).
+        description: Optional free text; indexed by full-text search.
+            Good for noting material, brand, condition.
+        quantity: How many of this thing this row represents. Default 1.
+            Convention: for atomic items present in multiple locations,
+            create one row per location (5 hammers across 2 rooms = 5
+            rows). For container-as-item cases (a box of 100 nails),
+            this row is THE box and quantity is the *contents* count.
+
+    Returns: the created node — {id, name, kind, parent_id, can_contain,
+        quantity, description, ..., tags: [], properties: []}.
+    """
+    body: dict = {"name": name, "kind": kind, "can_contain": can_contain}
+    if parent_id is not None:
+        body["parent_id"] = parent_id
+    if description is not None:
+        body["description"] = description
+    if quantity != 1:
+        body["quantity"] = quantity
+    return _call("POST", "/nodes", body=body)
+
+
+@mcp.tool()
+def get_node(node_id: int) -> dict:
+    """Fetch one node with its kind, tags, and properties.
+
+    Returns the same shape as `add_node` plus populated `tags` and
+    `properties`. Use this before suggesting changes so you see the
+    current state.
+    """
+    return _call("GET", f"/nodes/{node_id}")
+
+
+@mcp.tool()
+def find_nodes(
+    q: Optional[str] = None,
+    kind: Optional[str] = None,
+    tag: Optional[str] = None,
+    parent: Optional[str] = None,
+    limit: int = 50,
+) -> list[dict]:
+    """Search the inventory.
+
+    Combines MySQL FULLTEXT over name+description with optional kind/tag/
+    parent filters. The first thing to try when the user asks "where is
+    my X?" or "do I have any Y?".
+
+    Args:
+        q: Free-text query. Each word becomes a required prefix match
+            (`hammer` matches `hammer*`, `claw hammer` matches both).
+            Omit to list-with-filters-only.
+        kind: Kind slug to filter by (e.g. "tool", "drawer").
+        tag: Tag name to filter by.
+        parent: Confine to a subtree. "root" lists only top-level nodes,
+            or pass an integer node id (as a string) for that node's
+            subtree.
+        limit: Max results (1–200, default 50).
+
+    Returns: list of {id, name, kind, parent_id, can_contain, quantity,
+        score, match_reason, path}, where path is the full ancestor chain
+        root→self so you can show "Garage > Workbench > Drawer A > Hammer".
+    """
+    return _call(
+        "GET",
+        "/search",
+        params={"q": q, "kind": kind, "tag": tag, "parent": parent, "limit": limit},
+    )
+
+
+@mcp.tool()
+def get_children(node_id: int, limit: int = 50, offset: int = 0) -> list[dict]:
+    """List direct children of a node. Paginated."""
+    return _call(
+        "GET",
+        f"/nodes/{node_id}/children",
+        params={"limit": limit, "offset": offset},
+    )
+
+
+@mcp.tool()
+def get_path(node_id: int) -> list[dict]:
+    """Return the full ancestor chain root→self for a node.
+
+    Useful when you have an id and want to show the user "where" something
+    lives without recursing yourself.
+    """
+    return _call("GET", f"/nodes/{node_id}/path")
+
+
+@mcp.tool()
+def get_tree(node_id: int, depth: int = 10) -> dict:
+    """Return a subtree rooted at the given node.
+
+    Each level is expanded up to `depth` (default 10). Use `depth=1` if you
+    just want the node and its direct children.
+    """
+    return _call("GET", f"/nodes/{node_id}/tree", params={"depth": depth})
+
+
+@mcp.tool()
+def list_root_nodes(limit: int = 50, offset: int = 0) -> list[dict]:
+    """List top-level nodes (the things with no parent: garages, buildings, …)."""
+    return _call(
+        "GET",
+        "/nodes",
+        params={"parent": "root", "limit": limit, "offset": offset},
+    )
+
+
+@mcp.tool()
+def move_node(node_id: int, new_parent_id: Optional[int]) -> dict:
+    """Reparent a node.
+
+    Pass `new_parent_id=None` to make it a root. The new parent must have
+    can_contain=True and cannot be the node itself or one of its
+    descendants (the API rejects cycles).
+    """
+    return _call("PATCH", f"/nodes/{node_id}", body={"parent_id": new_parent_id})
+
+
+@mcp.tool()
+def rename_node(node_id: int, name: str) -> dict:
+    """Change a node's display name. The kind and tree position are unchanged."""
+    return _call("PATCH", f"/nodes/{node_id}", body={"name": name})
+
+
+@mcp.tool()
+def update_node(
+    node_id: int,
+    name: Optional[str] = None,
+    kind: Optional[str] = None,
+    description: Optional[str] = None,
+    quantity: Optional[int] = None,
+    can_contain: Optional[bool] = None,
+    width: Optional[float] = None,
+    height: Optional[float] = None,
+    depth: Optional[float] = None,
+    weight: Optional[float] = None,
+    gps_lat: Optional[float] = None,
+    gps_lng: Optional[float] = None,
+) -> dict:
+    """Partial-update a node's fields. Anything left as None is left alone.
+
+    For reparenting use `move_node`; for tag/property changes use the
+    `add_tag` / `set_property` / etc. tools.
+    """
+    body: dict = {}
+    for k, v in (
+        ("name", name),
+        ("kind", kind),
+        ("description", description),
+        ("quantity", quantity),
+        ("can_contain", can_contain),
+        ("width", width),
+        ("height", height),
+        ("depth", depth),
+        ("weight", weight),
+        ("gps_lat", gps_lat),
+        ("gps_lng", gps_lng),
+    ):
+        if v is not None:
+            body[k] = v
+    if not body:
+        return _call("GET", f"/nodes/{node_id}")
+    return _call("PATCH", f"/nodes/{node_id}", body=body)
+
+
+@mcp.tool()
+def delete_node(node_id: int, cascade: bool = False) -> str:
+    """Delete a node.
+
+    Without `cascade`, the API refuses if the node has children. Pass
+    `cascade=True` to delete the whole subtree. Operation is irreversible.
+    """
+    _call("DELETE", f"/nodes/{node_id}", params={"cascade": "true"} if cascade else None)
+    return f"deleted node {node_id}" + (" (cascade)" if cascade else "")
+
+
+@mcp.tool()
+def add_tag(node_id: int, tag: str) -> dict:
+    """Tag a node. Creates the tag if it doesn't exist yet (idempotent)."""
+    return _call("POST", f"/nodes/{node_id}/tags", body={"name": tag})
+
+
+@mcp.tool()
+def remove_tag(node_id: int, tag: str) -> str:
+    """Remove a tag from a node (by name). The tag itself stays in the catalog."""
+    tags = _call("GET", "/tags", params={"q": tag}) or []
+    match = next((t for t in tags if t["name"] == tag), None)
+    if match is None:
+        raise RuntimeError(f"no tag named {tag!r}")
+    _call("DELETE", f"/nodes/{node_id}/tags/{match['id']}")
+    return f"removed tag {tag!r} from node {node_id}"
+
+
+@mcp.tool()
+def list_tags(q: Optional[str] = None, limit: int = 50) -> list[dict]:
+    """List all tags in the catalog, optionally filtered by substring."""
+    return _call("GET", "/tags", params={"q": q, "limit": limit})
+
+
+@mcp.tool()
+def list_kinds(q: Optional[str] = None, limit: int = 50) -> list[dict]:
+    """List all kinds. Useful before calling add_node to know what slugs exist."""
+    return _call("GET", "/kinds", params={"q": q, "limit": limit})
+
+
+@mcp.tool()
+def create_kind(slug: str, label: Optional[str] = None) -> dict:
+    """Add a new kind (idempotent — returns the existing row if the slug is taken).
+
+    Default label is the slug titlecased. Use sparingly — prefer the
+    seeded set when it fits.
+    """
+    body: dict = {"slug": slug}
+    if label is not None:
+        body["label"] = label
+    return _call("POST", "/kinds", body=body)
+
+
+@mcp.tool()
+def set_property(
+    node_id: int,
+    key: str,
+    value: str,
+    value_type: Optional[str] = None,
+) -> dict:
+    """Set or update a property on a node.
+
+    The property *key* is created on first use. `value_type` is only
+    consulted at create-time — once a key exists, its type is fixed
+    across all nodes that use it.
+
+    Args:
+        node_id: which node.
+        key: property name, e.g. "color", "weight_g", "fragile".
+        value: the value as a string. For non-string types, pass it as a
+            string anyway ("600" for int, "true" for bool, "1.25" for
+            float); the server parses and validates.
+        value_type: one of "string" | "int" | "float" | "bool".
+            Required on first use of a key; ignored thereafter.
+    """
+    body: dict = {"value": value}
+    if value_type is not None:
+        body["value_type"] = value_type
+    return _call("PUT", f"/nodes/{node_id}/properties/{key}", body=body)
+
+
+@mcp.tool()
+def list_properties(node_id: int) -> list[dict]:
+    """List a node's properties as [{key, value, value_type}]."""
+    return _call("GET", f"/nodes/{node_id}/properties")
+
+
+@mcp.tool()
+def delete_property(node_id: int, key: str) -> str:
+    """Remove a property from a node."""
+    _call("DELETE", f"/nodes/{node_id}/properties/{key}")
+    return f"removed property {key!r} from node {node_id}"
+
+
+def main() -> None:
+    mcp.run()
+
+
+if __name__ == "__main__":
+    main()
