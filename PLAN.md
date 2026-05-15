@@ -89,10 +89,10 @@ Each milestone lands a working slice of the end-state design. The git workflow (
 - [x] **M1 — Token auth middleware.** Reads `WHEREISIT_TOKEN`; if set, every endpoint except `/health` requires `Authorization: Bearer <token>`. If unset, dev mode (open).
   - *Considerations:* single FastAPI dependency so swapping for JWT/OAuth later is a one-file change; document the env var in AGENTS.md.
 
-- [ ] **M2 — Schema reset to the unified model.** Drop every existing migration and table; introduce a fresh initial migration that creates `kinds`, `nodes`, `tags`, `node_tags`, `property_keys`, `node_properties`. Seed `kinds` with `room`, `building`, `cupboard`, `shelf`, `drawer`, `box`, `bag`, `item`, `tool`, `consumable`. FULLTEXT index on `nodes(name, description)`.
+- [x] **M2 — Schema reset to the unified model.** Drop every existing migration and table; introduce a fresh initial migration that creates `kinds`, `nodes`, `tags`, `node_tags`, `property_keys`, `node_properties`. Seed `kinds` with `room`, `building`, `cupboard`, `shelf`, `drawer`, `box`, `bag`, `item`, `tool`, `consumable`. FULLTEXT index on `nodes(name, description)`.
   - *Considerations:* `description` is TEXT (not VARCHAR) so embedding context isn't truncated; `updated_at` is what the embedding job will use to find stale rows; `quantity` semantics are user-interpreted (Decision #3).
 
-- [ ] **M3 — Core `/nodes` API (end-state shape).** Replace every existing router. CRUD + `/children`, `/path`, `/tree`. PATCH not PUT.
+- [x] **M3 — Core `/nodes` API (end-state shape).** Replace every existing router. CRUD + `/children`, `/path`, `/tree`. PATCH not PUT.
   - *Considerations:* never auto-expand children in the default node response (keep it lean); document responses in OpenAPI from day one.
 
 - [ ] **M4 — Tags, kinds, properties APIs.** Endpoints for the reference + join layers; create is idempotent by name/slug.

@@ -61,3 +61,33 @@ def client(_test_database):
 
     with TestClient(app) as c:
         yield c
+
+
+# Tables that hold per-test state. `kinds` stays — it's seeded by the migration
+# and many tests reference its rows.
+_TRUNCATE_TABLES = (
+    "node_properties",
+    "node_tags",
+    "nodes",
+    "tags",
+    "property_keys",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clean_node_state(_test_database):
+    """Empty the per-test tables before each test so writes can't leak."""
+    from sqlalchemy import text
+
+    from backend.app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        db.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
+        for table in _TRUNCATE_TABLES:
+            db.execute(text(f"TRUNCATE TABLE `{table}`"))
+        db.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
+        db.commit()
+    finally:
+        db.close()
+    yield

@@ -4,10 +4,12 @@ from fastapi.responses import HTMLResponse
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 
 from .auth import auth_middleware
+from .routers import nodes as nodes_router
 
 app = FastAPI(title="whereisit")
 
 app.middleware("http")(auth_middleware)
+app.include_router(nodes_router.router)
 
 app.add_middleware(
     CORSMiddleware,
