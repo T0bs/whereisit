@@ -40,6 +40,7 @@ class NodeSummary(BaseModel):
     name: str
     kind_id: int
     parent_id: Optional[int] = None
+    suggested_parent_id: Optional[int] = None
     can_contain: bool
     quantity: int
     created_at: datetime
@@ -53,6 +54,7 @@ class NodeOut(BaseModel):
     name: str
     kind: KindRef
     parent_id: Optional[int] = None
+    suggested_parent_id: Optional[int] = None
     can_contain: bool
     description: Optional[str] = None
     quantity: int

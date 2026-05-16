@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..inbox import is_inbox_kind
 from ..models import Kind, Node, NodeProperty, PropertyKey, Tag
 from ..schemas import (
     KindRef,
@@ -51,6 +52,7 @@ def _to_out(node: Node) -> NodeOut:
         name=node.name,
         kind=KindRef.model_validate(node.kind),
         parent_id=node.parent_id,
+        suggested_parent_id=node.suggested_parent_id,
         can_contain=node.can_contain,
         description=node.description,
         quantity=node.quantity,
@@ -224,6 +226,12 @@ def delete_node(
     db: Session = Depends(get_db),
 ):
     node = _node_or_404(db, node_id)
+    if is_inbox_kind(node):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "the Uncategorized inbox is system-managed and can't be deleted; "
+            "move or reassign its children instead",
+        )
     has_children = (
         db.execute(select(Node.id).where(Node.parent_id == node_id).limit(1)).first()
         is not None
