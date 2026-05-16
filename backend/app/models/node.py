@@ -22,6 +22,9 @@ class Node(Base):
     parent_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("nodes.id"), nullable=True
     )
+    suggested_parent_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("nodes.id", ondelete="SET NULL"), nullable=True
+    )
     can_contain: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
@@ -47,9 +50,14 @@ class Node(Base):
 
     kind: Mapped["Kind"] = relationship()
     parent: Mapped[Optional["Node"]] = relationship(
-        remote_side="Node.id", back_populates="children"
+        remote_side="Node.id",
+        back_populates="children",
+        foreign_keys="Node.parent_id",
     )
-    children: Mapped[List["Node"]] = relationship(back_populates="parent")
+    children: Mapped[List["Node"]] = relationship(
+        back_populates="parent",
+        foreign_keys="Node.parent_id",
+    )
     tags: Mapped[List["Tag"]] = relationship(
         secondary=node_tags, back_populates="nodes"
     )

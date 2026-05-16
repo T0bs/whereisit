@@ -89,4 +89,9 @@ export const api = {
   // embeddings
   embeddingsStatus: () => request("GET", "/embeddings"),
   backfillEmbeddings: (body = {}) => request("POST", "/embeddings/backfill", { body }),
+  // bulk + categories (M13)
+  bulkState: () => request("GET", "/bulk/state"),
+  bulkAdd: (names) => request("POST", "/bulk-add", { body: { names } }),
+  suggestCategories: (body) => request("POST", "/ai/suggest-categories", { body }),
+  acceptCategories: (body) => request("POST", "/ai/accept-categories", { body }),
 };

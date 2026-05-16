@@ -13,6 +13,7 @@ export const qk = {
   tags: ["tags"],
   search: (params) => ["search", params],
   embeddingsStatus: ["embeddings", "status"],
+  bulkState: ["bulk", "state"],
 };
 
 export function useRootNodes() {
@@ -110,5 +111,41 @@ export function useBackfillEmbeddings() {
   return useMutation({
     mutationFn: api.backfillEmbeddings,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.embeddingsStatus }),
+  });
+}
+
+// M13 — bulk + categories
+
+export function useBulkState() {
+  return useQuery({ queryKey: qk.bulkState, queryFn: api.bulkState });
+}
+
+function invalidateBulk(queryClient) {
+  queryClient.invalidateQueries({ queryKey: qk.bulkState });
+  queryClient.invalidateQueries({ queryKey: ["nodes"] });
+  queryClient.invalidateQueries({ queryKey: ["search"] });
+}
+
+export function useBulkAdd() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (names) => api.bulkAdd(names),
+    onSuccess: () => invalidateBulk(queryClient),
+  });
+}
+
+export function useSuggestCategories() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.suggestCategories,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.bulkState }),
+  });
+}
+
+export function useAcceptCategories() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.acceptCategories,
+    onSuccess: () => invalidateBulk(queryClient),
   });
 }

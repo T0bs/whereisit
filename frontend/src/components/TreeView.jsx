@@ -27,6 +27,11 @@ export default function TreeView({ selectedId, onSelect, onAddChild }) {
     for (const k of kinds) m[k.id] = k;
     return m;
   }, [kinds]);
+  // Hide the Uncategorized inbox from the main tree — the Bulk tab manages it.
+  const visibleRoots = useMemo(
+    () => roots.filter((n) => kindById[n.kind_id]?.slug !== "inbox"),
+    [roots, kindById]
+  );
   const updateNode = useUpdateNode();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const [errorMsg, setErrorMsg] = useState(null);
@@ -57,10 +62,10 @@ export default function TreeView({ selectedId, onSelect, onAddChild }) {
             {errorMsg}
           </div>
         )}
-        {roots.length === 0 ? (
+        {visibleRoots.length === 0 ? (
           <p className="px-4 text-sm text-slate-500">No nodes yet. Click <em>+ Add root</em> to start.</p>
         ) : (
-          roots.map((n) => (
+          visibleRoots.map((n) => (
             <TreeNode
               key={n.id}
               node={n}

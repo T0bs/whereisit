@@ -211,6 +211,32 @@ Cascade:
 
 The same operation is exposed as the MCP tool `suggest_placement` for terminal use.
 
+### Bulk add + suggest categories (M13)
+
+For first-pass cataloguing: paste a long list of names, let the LLM suggest where each belongs, accept (or override) in bulk.
+
+```bash
+# Add many leaf items at once — they all land in the auto-created "Uncategorized" inbox.
+curl -X POST http://127.0.0.1:8000/bulk-add \
+  -H 'Content-Type: application/json' \
+  -d '{"names": ["Claw hammer", "Cordless drill", "Spare AAA batteries"]}'
+
+# Get a snapshot for the UI: inbox id + current items + every can_contain category with its path.
+curl http://127.0.0.1:8000/bulk/state
+
+# Per-item LLM suggestion (reuses M9 cascade, excludes the inbox). Stores top pick in nodes.suggested_parent_id.
+curl -X POST http://127.0.0.1:8000/ai/suggest-categories \
+  -H 'Content-Type: application/json' \
+  -d '{"node_ids": [12, 13, 14]}'
+
+# Accept moves the items + clears suggestions. parent_id can be the suggestion or a user override.
+curl -X POST http://127.0.0.1:8000/ai/accept-categories \
+  -H 'Content-Type: application/json' \
+  -d '{"accepts": [{"node_id": 12, "parent_id": 5}, {"node_id": 13, "parent_id": 5}]}'
+```
+
+The Uncategorized container is system-managed (kind=inbox); `DELETE /nodes/<inbox_id>` returns 400. The frontend's **Bulk** tab is the primary surface — left tree hides the inbox subtree to keep the main view tidy.
+
 ### `POST /ai/ask`
 
 Natural-language Q&A and action (M10). Same two-gate cloud rule.

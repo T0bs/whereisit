@@ -62,10 +62,12 @@ def cascade(
     placement: PlacementInput,
     local_provider: LLMProvider,
     cloud_provider: Optional[LLMProvider] = None,
+    *,
+    exclude_ids: Optional[set[int]] = None,
 ) -> SuggestionResult:
     """Run the DB → local LLM → cloud cascade. Returns at most max_suggestions picks."""
 
-    candidates = score_containers(db, placement)
+    candidates = score_containers(db, placement, exclude_ids=exclude_ids)
     if not candidates:
         return SuggestionResult(suggestions=[], tier_used="empty_db", message="no containers exist yet")
 
@@ -98,13 +100,20 @@ def cascade(
     )
 
 
-def score_containers(db: Session, placement: PlacementInput) -> list[Candidate]:
+def score_containers(
+    db: Session,
+    placement: PlacementInput,
+    *,
+    exclude_ids: Optional[set[int]] = None,
+) -> list[Candidate]:
     """Tier 1: rank every can_contain=true node by tag overlap + kind affinity."""
     stmt = (
         select(Node)
         .where(Node.can_contain.is_(True))
         .options(joinedload(Node.kind), joinedload(Node.tags), joinedload(Node.parent))
     )
+    if exclude_ids:
+        stmt = stmt.where(~Node.id.in_(exclude_ids))
     nodes = db.execute(stmt).unique().scalars().all()
 
     wanted_tags = {t.lower() for t in placement.tags if t}

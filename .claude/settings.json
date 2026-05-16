@@ -10,7 +10,8 @@
       "mcp__whereisit__list_tags",
       "Bash(.venv/bin/pytest tests/test_ai_placement.py -v)",
       "Bash(.venv/bin/pytest -q)",
-      "Bash(.venv/bin/pytest tests/test_ai_embeddings.py -v)"
+      "Bash(.venv/bin/pytest tests/test_ai_embeddings.py -v)",
+      "Bash(scripts/db_mysql.sh -- -e \"DESCRIBE nodes; SELECT slug FROM kinds WHERE slug='inbox';\")"
     ]
   }
 }

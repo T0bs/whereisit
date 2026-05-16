@@ -3,12 +3,14 @@ import TreeView from "./components/TreeView";
 import NodeDetail from "./components/NodeDetail";
 import SearchPanel from "./components/SearchPanel";
 import AskPanel from "./components/AskPanel";
+import BulkPanel from "./components/BulkPanel";
 import QuickAddModal from "./components/QuickAddModal";
 
 const TABS = [
   { id: "detail", label: "Detail" },
   { id: "search", label: "Search" },
   { id: "ask", label: "Ask" },
+  { id: "bulk", label: "Bulk" },
 ];
 
 export default function App() {
@@ -77,6 +79,7 @@ export default function App() {
             )}
             {tab === "search" && <SearchPanel onSelect={handleSelect} />}
             {tab === "ask" && <AskPanel onSelect={handleSelect} />}
+            {tab === "bulk" && <BulkPanel onSelect={handleSelect} />}
           </div>
         </main>
       </div>
