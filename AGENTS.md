@@ -211,6 +211,14 @@ Cascade:
 
 The same operation is exposed as the MCP tool `suggest_placement` for terminal use.
 
+### Heuristic learning from prior placements (M14)
+
+`POST /ai/suggest-placement` and `POST /ai/suggest-categories` learn from the existing inventory without any explicit training: every item already placed in the tree is a labeled example. For each candidate container, the scorer computes the max Dice similarity between the new item's name tokens and an existing child's tokens, scales by 1.5, and takes `max(tag_kind_score, neighbor_score)` as the final score.
+
+Practical effect: once you've put "Claw hammer" in Tool drawer, the next "Ball-peen hammer" gets a high-confidence heuristic suggestion to the same drawer — no LLM call, no embedding lookup, deterministic and explainable. The suggestion reason includes the matched sibling ("name overlaps existing sibling 'Claw hammer'").
+
+Tunable constants live in [backend/app/ai/placement.py](backend/app/ai/placement.py): `TAG_WEIGHT`, `KIND_WEIGHT`, `NEIGHBOR_SCALE`, `HIGH_CONFIDENCE`.
+
 ### Bulk add + suggest categories (M13)
 
 For first-pass cataloguing: paste a long list of names, let the LLM suggest where each belongs, accept (or override) in bulk.
