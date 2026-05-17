@@ -19,7 +19,7 @@ def get_provider(name: str | None = None) -> LLMProvider:
     if selected == "local":
         return LocalProvider(
             base_url=os.getenv("LLM_LOCAL_URL", "http://127.0.0.1:11434"),
-            model=os.getenv("LLM_LOCAL_MODEL", "llama3.1:8b"),
+            model=os.getenv("LLM_LOCAL_MODEL", "qwen2.5:7b"),
             embed_model=os.getenv("LLM_EMBED_MODEL", "nomic-embed-text"),
         )
     if selected == "anthropic":

@@ -14,7 +14,7 @@ class LocalProvider(LLMProvider):
         self,
         *,
         base_url: str = "http://127.0.0.1:11434",
-        model: str = "llama3.1:8b",
+        model: str = "qwen2.5:7b",
         embed_model: str = "nomic-embed-text",
         timeout: float = 120.0,
         client: httpx.Client | None = None,

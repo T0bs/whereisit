@@ -163,7 +163,7 @@ The check lives in a single middleware function so swapping for JWT/OAuth later 
 
 [`backend/app/ai/`](backend/app/ai/) exposes an `LLMProvider` abstraction with `generate(messages)` and `tool_use_loop(messages, tools, on_tool_call)`. Two concrete providers ship out of the box:
 
-- **`LocalProvider`** (default) — Ollama HTTP at `LLM_LOCAL_URL` (default `http://127.0.0.1:11434`), model `LLM_LOCAL_MODEL` (default `llama3.1:8b`). Zero marginal cost.
+- **`LocalProvider`** (default) — Ollama HTTP at `LLM_LOCAL_URL` (default `http://127.0.0.1:11434`), model `LLM_LOCAL_MODEL` (default `qwen2.5:7b` — better at structured tool calling than `llama3.1:8b`). Zero marginal cost.
 - **`AnthropicProvider`** — `claude-haiku-4-5` by default, override via `ANTHROPIC_MODEL`; requires `ANTHROPIC_API_KEY`. Calls are billed against the API key's account, separate from any Claude Code subscription.
 
 Pick at runtime with `LLM_PROVIDER=local|anthropic` (default `local`):
@@ -283,7 +283,7 @@ Install Ollama for the local path (one-time):
 
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh
-ollama pull llama3.1:8b           # chat / tool-use (M8-M10)
+ollama pull qwen2.5:7b            # chat / tool-use (M8-M10) — strong at structured outputs
 ollama pull nomic-embed-text      # embeddings (M11)
 ```
 
