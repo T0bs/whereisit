@@ -31,8 +31,21 @@ KIND_AFFINITY: dict[str, dict[str, float]] = {
 
 TAG_WEIGHT = 0.6
 KIND_WEIGHT = 0.4
+NEIGHBOR_SCALE = 1.5  # see score_containers for the rationale
 HIGH_CONFIDENCE = 0.6
 LLM_CANDIDATE_CAP = 50
+
+
+# Tokens we strip when comparing item names for "neighbour" similarity (M14).
+# Tiny English-only stopword set — we're matching short product names, not prose.
+_NAME_STOPWORDS = frozenset(
+    {
+        "a", "an", "the", "of", "with", "for", "and", "or", "to", "in", "on", "at",
+        "my", "your", "our", "this", "that", "these", "those",
+        "is", "are", "was", "were", "be",
+    }
+)
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
 @dataclass
@@ -106,7 +119,14 @@ def score_containers(
     *,
     exclude_ids: Optional[set[int]] = None,
 ) -> list[Candidate]:
-    """Tier 1: rank every can_contain=true node by tag overlap + kind affinity."""
+    """Tier 1: rank every can_contain=true node.
+
+    Each container gets two independent signals — `tag_kind_score` (tag overlap
+    weighted with kind affinity, M9) and `neighbor_score` (max Dice similarity
+    between the new item name and an existing child's name, M14). The final
+    score is the max of the two: a container can win either by being a good
+    semantic fit for the kind/tags, or by already holding similar things.
+    """
     stmt = (
         select(Node)
         .where(Node.can_contain.is_(True))
@@ -118,16 +138,80 @@ def score_containers(
 
     wanted_tags = {t.lower() for t in placement.tags if t}
     wanted_kind = (placement.kind or "").lower() or None
+    new_name_tokens = _tokenize(placement.description)
+
+    children_by_parent = _load_children_names(db, [n.id for n in nodes])
 
     scored: list[Candidate] = []
     for node in nodes:
         tag_overlap = _tag_overlap_score(wanted_tags, node)
         kind_score = _kind_affinity_score(wanted_kind, node)
-        score = TAG_WEIGHT * tag_overlap + KIND_WEIGHT * kind_score
-        scored.append(Candidate(node=node, score=score))
+        tag_kind_score = TAG_WEIGHT * tag_overlap + KIND_WEIGHT * kind_score
+
+        children_names = children_by_parent.get(node.id, [])
+        neighbor_score, neighbor_match = _neighbor_score(new_name_tokens, children_names)
+        # Dice over short item names tops out around 0.4 even when a clear word
+        # matches ("Claw hammer" vs "Ball-peen hammer" → 0.4). Scale so a real
+        # match crosses HIGH_CONFIDENCE; cap at 1.0.
+        neighbor_score = min(neighbor_score * NEIGHBOR_SCALE, 1.0)
+
+        score = max(tag_kind_score, neighbor_score)
+        candidate = Candidate(node=node, score=score)
+        # Stash the winning neighbour's name on a private attr — _heuristic_reason
+        # picks it up to explain "matched a sibling" cases.
+        candidate._neighbor_match = neighbor_match  # type: ignore[attr-defined]
+        candidate._neighbor_score = neighbor_score  # type: ignore[attr-defined]
+        scored.append(candidate)
 
     scored.sort(key=lambda c: (c.score, c.node.id), reverse=True)
     return scored
+
+
+def _load_children_names(db: Session, parent_ids: list[int]) -> dict[int, list[str]]:
+    """One query that returns {parent_id: [child_name, ...]} for the given parents."""
+    if not parent_ids:
+        return {}
+    rows = db.execute(
+        select(Node.parent_id, Node.name).where(Node.parent_id.in_(parent_ids))
+    ).all()
+    out: dict[int, list[str]] = {}
+    for parent_id, child_name in rows:
+        if parent_id is None:
+            continue
+        out.setdefault(parent_id, []).append(child_name)
+    return out
+
+
+def _tokenize(name: str) -> set[str]:
+    """Lowercase, strip punctuation, drop stopwords and single-char tokens."""
+    tokens = _TOKEN_RE.findall((name or "").lower())
+    return {t for t in tokens if len(t) > 1 and t not in _NAME_STOPWORDS}
+
+
+def _dice(a: set[str], b: set[str]) -> float:
+    """Sørensen–Dice coefficient over token sets: 2|A∩B| / (|A|+|B|). 0 if either is empty."""
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    if inter == 0:
+        return 0.0
+    return 2.0 * inter / (len(a) + len(b))
+
+
+def _neighbor_score(
+    new_tokens: set[str], children_names: list[str]
+) -> tuple[float, Optional[str]]:
+    """Best Dice match between the new item's tokens and any child's. Returns (score, child_name)."""
+    if not new_tokens or not children_names:
+        return 0.0, None
+    best_score = 0.0
+    best_name: Optional[str] = None
+    for child_name in children_names:
+        score = _dice(new_tokens, _tokenize(child_name))
+        if score > best_score:
+            best_score = score
+            best_name = child_name
+    return best_score, best_name
 
 
 def llm_rerank(
@@ -252,6 +336,12 @@ def _heuristic_reason(c: Candidate, placement: PlacementInput) -> str:
         aff = KIND_AFFINITY.get(placement.kind.lower(), {}).get(c.node.kind.slug, 0.0)
         if aff > 0:
             parts.append(f"{placement.kind} fits well in {c.node.kind.slug}")
+    neighbor_match = getattr(c, "_neighbor_match", None)
+    neighbor_score = getattr(c, "_neighbor_score", 0.0)
+    if neighbor_match and neighbor_score > 0:
+        parts.append(
+            f"name overlaps existing sibling {neighbor_match!r} (sim={neighbor_score:.2f})"
+        )
     if not parts:
         parts.append("best heuristic match available")
     return "; ".join(parts)
